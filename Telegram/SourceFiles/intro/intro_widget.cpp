@@ -116,7 +116,7 @@ Widget::Widget(
 		appendStep(new PhoneWidget(this, _account, getData()));
 		break;
 	case EnterPoint::Qr:
-		appendStep(new QrWidget(this, _account, getData()));
+		appendStep(new PhoneWidget(this, _account, getData()));
 		break;
 	default: Unexpected("Enter point in Intro::Widget::Widget.");
 	}

@@ -7,19 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "ui/countryinput.h"
 #include "intro/intro_step.h"
-#include "base/timer.h"
 
 namespace Ui {
-class PhonePartInput;
-class CountryCodeInput;
-class RoundButton;
-class FlatLabel;
+class InputField;
+class PasswordInput;
 } // namespace Ui
 
-namespace Intro {
-namespace details {
+namespace Intro::details {
 
 class PhoneWidget final : public Step {
 public:
@@ -29,8 +24,6 @@ public:
 		not_null<Data*> data);
 
 	QString accessibilityName() override;
-
-	void selectCountry(const QString &country);
 
 	void setInnerFocus() override;
 	void activate() override;
@@ -46,32 +39,9 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
-	void setupQrLogin();
-	void phoneChanged();
-	void checkRequest();
-	void countryChanged();
-
-	void phoneSubmitDone(const MTPauth_SentCode &result);
-	void phoneSubmitFail(const MTP::Error &error);
-
-	QString fullNumber() const;
-	void stopCheck();
-
-	void showPhoneError(rpl::producer<QString> text);
-	void hidePhoneError();
-
-	bool _changed = false;
-
-	object_ptr<CountryInput> _country;
-	object_ptr<Ui::CountryCodeInput> _code;
-	object_ptr<Ui::PhonePartInput> _phone;
-
-	QString _sentPhone;
-	mtpRequestId _sentRequest = 0;
-
-	base::Timer _checkRequestTimer;
+	object_ptr<Ui::InputField> _username;
+	object_ptr<Ui::PasswordInput> _password;
 
 };
 
-} // namespace details
-} // namespace Intro
+} // namespace Intro::details

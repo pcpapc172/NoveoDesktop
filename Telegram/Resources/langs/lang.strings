@@ -409,6 +409,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_intro_email_setup_title" = "Choose a login email";
 "lng_intro_email_confirm_subtitle" = "Please check your email {email} (don't forget the spam folder) and enter the code we just sent you.";
 
+"lng_noveo_login_title" = "Sign in to Noveo";
+"lng_noveo_login_description" = "Enter your username and password.";
+"lng_noveo_login_username" = "Username";
+"lng_noveo_login_password" = "Password";
+"lng_noveo_login_username_required" = "Enter your username.";
+"lng_noveo_login_password_required" = "Enter your password.";
+"lng_noveo_login_unavailable" = "Sign-in is not available in this build yet.";
+
 "lng_phone_title" = "Your Phone Number";
 "lng_phone_desc" = "Please confirm your country code\nand enter your phone number.";
 "lng_phone_to_qr" = "Quick log in using QR code";
