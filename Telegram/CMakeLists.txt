@@ -1410,6 +1410,8 @@ PRIVATE
     intro/intro_email.h
     intro/intro_password_check.cpp
     intro/intro_password_check.h
+    noveo/auth_client.cpp
+    noveo/auth_client.h
     intro/intro_phone.cpp
     intro/intro_phone.h
     intro/intro_qr.cpp

@@ -52,6 +52,7 @@ public:
 
 	enum class Mode {
 		Normal,
+		Noveo,
 		KeysDestroyer,
 	};
 
@@ -94,6 +95,7 @@ public:
 	int32 dcstate(ShiftedDcId shiftedDcId = 0);
 	QString dctransport(ShiftedDcId shiftedDcId = 0);
 	void ping();
+	void setNoveoConnected(bool connected);
 	void cancel(mtpRequestId requestId);
 	int32 state(mtpRequestId requestId); // < 0 means waiting for such count of ms
 

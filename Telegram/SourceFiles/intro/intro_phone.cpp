@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "intro/intro_phone.h"
 
 #include "lang/lang_keys.h"
+#include "main/main_account.h"
+#include "crl/crl_on_main.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/fields/password_input.h"
 
@@ -43,6 +45,16 @@ PhoneWidget::PhoneWidget(
 	});
 }
 
+PhoneWidget::~PhoneWidget() {
+	account().cancelNoveoLogin();
+}
+
+rpl::producer<QString> PhoneWidget::nextButtonText() const {
+	return _submitting.value() | rpl::map([](bool submitting) {
+		return submitting ? tr::lng_noveo_login_progress() : tr::lng_intro_next();
+	}) | rpl::flatten_latest();
+}
+
 QString PhoneWidget::accessibilityName() {
 	return tr::lng_noveo_login_title(tr::now);
 }
@@ -55,7 +67,7 @@ void PhoneWidget::resizeEvent(QResizeEvent *e) {
 }
 
 void PhoneWidget::submit() {
-	if (isHidden()) {
+	if (isHidden() || _submitting.current()) {
 		return;
 	} else if (_username->getLastText().trimmed().isEmpty()) {
 		_username->showError();
@@ -68,7 +80,19 @@ void PhoneWidget::submit() {
 		showError(tr::lng_noveo_login_password_required());
 		return;
 	}
-	showError(tr::lng_noveo_login_unavailable());
+	hideError();
+	_submitting = true;
+	_username->setEnabled(false);
+	_password->setEnabled(false);
+	account().loginNoveo(_username->getLastText().trimmed(), _password->getLastText(),
+		crl::guard(this, [this](QString error) {
+			_submitting = false;
+			_username->setEnabled(true);
+			_password->setEnabled(true);
+			_password->clear();
+			_password->setFocusFast();
+			showError(rpl::single(std::move(error)));
+		}));
 }
 
 void PhoneWidget::setInnerFocus() {
@@ -87,6 +111,10 @@ void PhoneWidget::finished() {
 }
 
 void PhoneWidget::cancelled() {
+	account().cancelNoveoLogin();
+	_submitting = false;
+	_username->setEnabled(true);
+	_password->setEnabled(true);
 	_password->clear();
 }
 

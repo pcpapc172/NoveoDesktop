@@ -30,6 +30,8 @@ public:
 	void finished() override;
 	void cancelled() override;
 	void submit() override;
+	rpl::producer<QString> nextButtonText() const override;
+	~PhoneWidget();
 
 	bool hasBack() const override {
 		return true;
@@ -39,6 +41,7 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
+	rpl::variable<bool> _submitting = false;
 	object_ptr<Ui::InputField> _username;
 	object_ptr<Ui::PasswordInput> _password;
 

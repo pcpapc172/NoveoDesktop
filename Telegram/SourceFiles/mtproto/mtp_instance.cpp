@@ -165,6 +165,9 @@ public:
 
 	[[nodiscard]] not_null<Session*> getSession(ShiftedDcId shiftedDcId);
 
+	void setNoveoConnected(bool connected);
+	bool isNoveo() const { return _mode == Mode::Noveo; }
+
 	bool isNormal() const {
 		return (_mode == Instance::Mode::Normal);
 	}
@@ -220,6 +223,7 @@ private:
 	void checkDelayedRequests();
 
 	const not_null<Instance*> _instance;
+	bool _noveoConnected = false;
 	const Instance::Mode _mode = Instance::Mode::Normal;
 	const std::unique_ptr<Config> _config;
 	const std::shared_ptr<base::NetworkReachability> _networkReachability;
@@ -374,6 +378,7 @@ Instance::Private::Private(
 }
 
 void Instance::Private::start() {
+	if (isNoveo()) return;
 	if (isKeysDestroyer()) {
 		for (const auto &[shiftedDcId, dc] : _dcenters) {
 			startSession(shiftedDcId);
@@ -512,6 +517,7 @@ rpl::producer<DcId> Instance::Private::mainDcIdValue() const {
 }
 
 void Instance::Private::requestConfig() {
+	if (isNoveo()) return;
 	if (_configLoader || isKeysDestroyer()) {
 		return;
 	}
@@ -542,6 +548,7 @@ void Instance::Private::badConfigurationError() {
 }
 
 void Instance::Private::syncHttpUnixtime() {
+	if (isNoveo()) return;
 	if (base::unixtime::http_valid() || _httpUnixtimeLoader) {
 		return;
 	}
@@ -621,6 +628,7 @@ void Instance::Private::restart(ShiftedDcId shiftedDcId) {
 }
 
 int32 Instance::Private::dcstate(ShiftedDcId shiftedDcId) {
+	if (isNoveo()) return _noveoConnected ? ConnectedState : DisconnectedState;
 	if (!shiftedDcId) {
 		Assert(_mainSession != nullptr);
 		return _mainSession->getState();
@@ -638,6 +646,7 @@ int32 Instance::Private::dcstate(ShiftedDcId shiftedDcId) {
 }
 
 QString Instance::Private::dctransport(ShiftedDcId shiftedDcId) {
+	if (isNoveo()) return QStringLiteral("Noveo WebSocket");
 	if (!shiftedDcId) {
 		Assert(_mainSession != nullptr);
 		return _mainSession->transport();
@@ -654,6 +663,7 @@ QString Instance::Private::dctransport(ShiftedDcId shiftedDcId) {
 }
 
 void Instance::Private::ping() {
+	if (isNoveo()) return;
 	getSession(0)->ping();
 }
 
@@ -683,6 +693,7 @@ void Instance::Private::cancel(mtpRequestId requestId) {
 
 // result < 0 means waiting for such count of ms.
 int32 Instance::Private::state(mtpRequestId requestId) {
+	if (isNoveo()) return requestId > 0 ? RequestSent : dcstate(0);
 	if (requestId > 0) {
 		if (const auto shiftedDcId = queryRequestByDc(requestId)) {
 			const auto session = getSession(std::abs(*shiftedDcId));
@@ -719,6 +730,7 @@ void Instance::Private::reInitConnection(DcId dcId) {
 }
 
 void Instance::Private::logout(Fn<void()> done) {
+	if (isNoveo()) { done(); return; }
 	_instance->send(MTPauth_LogOut(), [=](Response) {
 		done();
 		return true;
@@ -1017,6 +1029,17 @@ void Instance::Private::sendRequest(
 		crl::time msCanWait,
 		bool needsLayer,
 		mtpRequestId afterRequestId) {
+	if (isNoveo()) {
+		request->requestId = requestId;
+		storeRequest(requestId, request, std::move(callbacks));
+		InvokeQueued(_instance, [=, this] {
+			auto response = Response();
+			response.requestId = requestId;
+			MTP_rpc_error(MTP_int(406), MTP_string("NOVEO_METHOD_UNSUPPORTED")).write(response.reply);
+			processCallback(response);
+		});
+		return;
+	}
 	const auto session = getSession(shiftedDcId);
 
 	request->requestId = requestId;
@@ -1971,6 +1994,17 @@ QString Instance::dctransport(ShiftedDcId shiftedDcId) {
 	return _private->dctransport(shiftedDcId);
 }
 
+void Instance::Private::setNoveoConnected(bool connected) {
+	_noveoConnected = connected;
+	if (_stateChangedHandler) {
+		_stateChangedHandler(mainDcId(), connected ? ConnectedState : DisconnectedState);
+	}
+}
+
+void Instance::setNoveoConnected(bool connected) {
+	_private->setNoveoConnected(connected);
+}
+
 void Instance::ping() {
 	_private->ping();
 }
@@ -2130,6 +2164,7 @@ void Instance::sendRequest(
 }
 
 void Instance::sendAnything(ShiftedDcId shiftedDcId, crl::time msCanWait) {
+	if (_private->isNoveo()) return;
 	_private->getSession(shiftedDcId)->sendAnything(msCanWait);
 }
 

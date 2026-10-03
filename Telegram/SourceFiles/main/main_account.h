@@ -11,6 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtp_instance.h"
 #include "base/weak_ptr.h"
 
+namespace Noveo {
+class AuthClient;
+} // namespace Noveo
+
 namespace Storage {
 class Account;
 class Domain;
@@ -57,6 +61,9 @@ public:
 		QByteArray serialized,
 		int streamVersion,
 		std::unique_ptr<SessionSettings> settings);
+
+	void loginNoveo(QString username, QString password, Fn<void(QString)> fail);
+	void cancelNoveoLogin();
 
 	void logOut();
 	void forcedLogOut();
@@ -125,19 +132,15 @@ private:
 		LoggedOut,
 	};
 
-	void startMtp(std::unique_ptr<MTP::Config> config);
+	void startNoveoRuntime(std::unique_ptr<MTP::Config> config);
+	void prepareNoveoClient();
 	void createSession(
 		const MTPUser &user,
 		QByteArray serialized,
 		int streamVersion,
 		std::unique_ptr<SessionSettings> settings);
-	void watchProxyChanges();
 	void watchSessionChanges();
-	bool checkForUpdates(const MTP::Response &message);
-	bool checkForNewSession(const MTP::Response &message);
 
-	void destroyMtpKeys(MTP::AuthKeysList &&keys);
-	void resetAuthorizationKeys();
 
 	void loggedOut();
 	void destroySession(DestroyReason reason);
@@ -145,9 +148,10 @@ private:
 	const not_null<Domain*> _domain;
 	const std::unique_ptr<Storage::Account> _local;
 
+	std::unique_ptr<Noveo::AuthClient> _noveo;
+	Fn<void(QString)> _noveoLoginFail;
 	std::unique_ptr<MTP::Instance> _mtp;
 	rpl::variable<MTP::Instance*> _mtpValue;
-	std::unique_ptr<MTP::Instance> _mtpForKeysDestroy;
 	rpl::event_stream<MTPUpdates> _mtpUpdates;
 	rpl::event_stream<> _mtpNewSessionCreated;
 
@@ -163,7 +167,6 @@ private:
 	int32 _sessionUserStreamVersion = 0;
 	std::unique_ptr<SessionSettings> _storedSessionSettings;
 	MTP::Instance::Fields _mtpFields;
-	MTP::AuthKeysList _mtpKeysToDestroy;
 	bool _loggingOut = false;
 	bool _destroyingSession = false;
 

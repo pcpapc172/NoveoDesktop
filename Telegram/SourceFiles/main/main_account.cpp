@@ -7,6 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
 
+#include "noveo/auth_client.h"
+#include "lang/lang_keys.h"
+#include <QtCore/QCryptographicHash>
+#include <QtCore/QJsonDocument>
+
 #include "base/platform/base_platform_info.h"
 #include "core/application.h"
 #include "storage/storage_account.h"
@@ -32,6 +37,7 @@ namespace Main {
 namespace {
 
 constexpr auto kWideIdsTag = ~uint64(0);
+constexpr auto kNoveoAuthorizationTag = quint32(0x4E4F5645);
 
 [[nodiscard]] QString ComposeDataString(const QString &dataName, int index) {
 	auto result = dataName;
@@ -52,6 +58,7 @@ Account::Account(not_null<Domain*> domain, const QString &dataName, int index)
 }
 
 Account::~Account() {
+	if (_noveo) _noveo->cancel();
 	if (const auto session = maybeSession()) {
 		session->saveSettingsNowIfNeeded();
 		_local->writeSearchSuggestionsIfNeeded();
@@ -77,41 +84,19 @@ std::unique_ptr<MTP::Config> Account::prepareToStart(
 
 void Account::start(std::unique_ptr<MTP::Config> config) {
 	_appConfig = std::make_unique<AppConfig>(this);
-	startMtp(config
+	startNoveoRuntime(config
 		? std::move(config)
 		: std::make_unique<MTP::Config>(
 			Core::App().fallbackProductionConfig()));
-	_appConfig->start();
-	watchProxyChanges();
+	prepareNoveoClient();
+	const auto authorization = _noveo->authorization();
+	if (!authorization.isEmpty()) _noveo->restore(authorization);
 	watchSessionChanges();
 }
 
 void Account::prepareToStartAdded(
 		std::shared_ptr<MTP::AuthKey> localKey) {
 	_local->startAdded(std::move(localKey));
-}
-
-void Account::watchProxyChanges() {
-	using ProxyChange = Core::Application::ProxyChange;
-
-	Core::App().proxyChanges(
-	) | rpl::on_next([=](const ProxyChange &change) {
-		const auto key = [&](const MTP::ProxyData &proxy) {
-			return (proxy.type == MTP::ProxyData::Type::Mtproto
-				|| proxy.type == MTP::ProxyData::Type::Web)
-				? std::make_pair(proxy.host, proxy.port)
-				: std::make_pair(QString(), uint32(0));
-		};
-		if (_mtp) {
-			_mtp->restart();
-			if (key(change.was) != key(change.now)) {
-				_mtp->reInitConnection(_mtp->mainDcId());
-			}
-		}
-		if (_mtpForKeysDestroy) {
-			_mtpForKeysDestroy->restart();
-		}
-	}, _lifetime);
 }
 
 void Account::watchSessionChanges() {
@@ -319,6 +304,10 @@ QByteArray Account::serializeMtpAuthorization() const {
 				<< qint32(mainDcId);
 			writeKeys(stream, keys);
 			writeKeys(stream, keysToDestroy);
+			if (_noveo && !_noveo->authorization().isEmpty()) {
+				stream << kNoveoAuthorizationTag
+					<< QJsonDocument(_noveo->authorization()).toJson(QJsonDocument::Compact);
+			}
 
 			DEBUG_LOG(("MTP Info: Keys written, userId: %1, dcId: %2"
 				).arg(currentUserId.bare
@@ -326,16 +315,7 @@ QByteArray Account::serializeMtpAuthorization() const {
 		}
 		return result;
 	};
-	if (_mtp) {
-		const auto keys = _mtp->getKeysForWrite();
-		const auto keysToDestroy = _mtpForKeysDestroy
-			? _mtpForKeysDestroy->getKeysForWrite()
-			: MTP::AuthKeysList();
-		return serialize(_mtp->mainDcId(), keys, keysToDestroy);
-	}
-	const auto &keys = _mtpFields.keys;
-	const auto &keysToDestroy = _mtpKeysToDestroy;
-	return serialize(_mtpFields.mainDcId, keys, keysToDestroy);
+	return serialize(_mtp ? _mtp->mainDcId() : _mtpFields.mainDcId, {}, {});
 }
 
 void Account::setSessionUserId(UserId userId) {
@@ -416,14 +396,25 @@ void Account::setMtpAuthorization(const QByteArray &serialized) {
 		}
 	};
 	readKeys(_mtpFields.keys);
-	readKeys(_mtpKeysToDestroy);
+	auto legacyKeysToDestroy = MTP::AuthKeysList();
+	readKeys(legacyKeysToDestroy);
+	_mtpFields.keys.clear();
+	if (!stream.atEnd() && stream.status() == QDataStream::Ok) {
+		auto tag = quint32();
+		auto authorization = QByteArray();
+		stream >> tag >> authorization;
+		if (stream.status() == QDataStream::Ok && tag == kNoveoAuthorizationTag) {
+			prepareNoveoClient();
+			_noveo->restore(QJsonDocument::fromJson(authorization).object(), false);
+		}
+	}
 	LOG(("MTP Info: "
 		"read keys, current: %1, to destroy: %2"
 		).arg(_mtpFields.keys.size()
-		).arg(_mtpKeysToDestroy.size()));
+		).arg(legacyKeysToDestroy.size()));
 }
 
-void Account::startMtp(std::unique_ptr<MTP::Config> config) {
+void Account::startNoveoRuntime(std::unique_ptr<MTP::Config> config) {
 	Expects(!_mtp);
 
 	auto fields = base::take(_mtpFields);
@@ -431,20 +422,8 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	fields.deviceModel = Platform::DeviceModelPretty();
 	fields.systemVersion = Platform::SystemVersionPretty();
 	_mtp = std::make_unique<MTP::Instance>(
-		MTP::Instance::Mode::Normal,
+		MTP::Instance::Mode::Noveo,
 		std::move(fields));
-
-	const auto writingKeys = _mtp->lifetime().make_state<bool>(false);
-	_mtp->writeKeysRequests(
-	) | rpl::filter([=] {
-		return !*writingKeys;
-	}) | rpl::on_next([=] {
-		*writingKeys = true;
-		Ui::PostponeCall(_mtp.get(), [=] {
-			local().writeMtpData();
-			*writingKeys = false;
-		});
-	}, _mtp->lifetime());
 
 	const auto writingConfig = _lifetime.make_state<bool>(false);
 	rpl::merge(
@@ -462,33 +441,11 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 
 	_mtpFields.mainDcId = _mtp->mainDcId();
 
-	_mtp->setUpdatesHandler([=](const MTP::Response &message) {
-		checkForUpdates(message) || checkForNewSession(message);
-	});
-	_mtp->setGlobalFailHandler([=](const MTP::Error &, const MTP::Response &) {
-		if (const auto session = maybeSession()) {
-			crl::on_main(session, [=] { logOut(); });
-		}
-	});
-	_mtp->setStateChangedHandler([=](MTP::ShiftedDcId dc, int32 state) {
-		if (dc == _mtp->mainDcId()) {
-			Core::App().settings().proxy().connectionTypeChangesNotify();
-			Core::App().checkProxyRotation(this, state);
-		}
-	});
-	_mtp->setSessionResetHandler([=](MTP::ShiftedDcId shiftedDcId) {
-		if (const auto session = maybeSession()) {
-			if (shiftedDcId == _mtp->mainDcId()) {
-				session->updates().getDifference();
-			}
-		}
+	_mtp->setStateChangedHandler([this](MTP::ShiftedDcId, int32) {
+		Core::App().settings().proxy().connectionTypeChangesNotify();
 	});
 
-	if (!_mtpKeysToDestroy.empty()) {
-		destroyMtpKeys(base::take(_mtpKeysToDestroy));
-	}
-
-	if (_sessionUserId) {
+	if (_sessionUserId && _noveo && !_noveo->authorization().isEmpty()) {
 		createSession(
 			_sessionUserId,
 			base::take(_sessionUserSerialized),
@@ -507,37 +464,72 @@ void Account::startMtp(std::unique_ptr<MTP::Config> config) {
 	_mtpValue = _mtp.get();
 }
 
-bool Account::checkForUpdates(const MTP::Response &message) {
-	auto updates = MTPUpdates();
-	auto from = message.reply.constData();
-	if (!updates.read(from, from + message.reply.size())) {
-		return false;
-	}
-	_mtpUpdates.fire(std::move(updates));
-	return true;
+void Account::prepareNoveoClient() {
+	if (_noveo) return;
+	_noveo = std::make_unique<Noveo::AuthClient>();
+	_noveo->onConnectionChanged = [this](bool connected) {
+		if (_mtp) _mtp->setNoveoConnected(connected);
+	};
+	_noveo->onError = [this](Noveo::AuthClient::Error error) {
+		using Error = Noveo::AuthClient::Error;
+		const auto text = (error == Error::Credentials)
+			? tr::lng_noveo_login_invalid(tr::now)
+			: (error == Error::RateLimited) ? tr::lng_noveo_login_rate_limited(tr::now)
+			: (error == Error::TwoFactorRequired) ? tr::lng_noveo_login_two_factor(tr::now)
+			: (error == Error::Timeout) ? tr::lng_noveo_login_timeout(tr::now)
+			: tr::lng_noveo_login_connection_error(tr::now);
+		if (const auto fail = base::take(_noveoLoginFail)) fail(text);
+		if (error == Error::SessionExpired) {
+			crl::on_main(this, [this] { logOut(); });
+		}
+	};
+	_noveo->onAuthenticated = [this](const QJsonObject &profile) {
+		_noveoLoginFail = nullptr;
+		// Stable positive native peer id, derived from the backend UUID.
+		const auto digest = QCryptographicHash::hash(
+			profile.value("userId").toString().toUtf8(), QCryptographicHash::Sha256);
+		auto id = uint64();
+		for (auto i = 0; i != 7; ++i) id = (id << 8) | uchar(digest[i]);
+		id = std::max(id, uint64(1));
+		const auto username = profile.value("username").toString();
+		const auto name = profile.value("displayName").toString(username);
+		const auto flags = MTPDuser::Flag::f_self | MTPDuser::Flag::f_first_name
+			| MTPDuser::Flag::f_username;
+		const auto user = MTP_user(
+			MTP_flags(flags), MTP_long(id), MTPlong(),
+			MTP_string(name), MTPstring(), MTP_string(username), MTPstring(),
+			MTPUserProfilePhoto(), MTPUserStatus(), MTPint(),
+			MTPVector<MTPRestrictionReason>(), MTPstring(), MTPstring(),
+			MTPEmojiStatus(), MTPVector<MTPUsername>(), MTPRecentStory(),
+			MTPPeerColor(), MTPPeerColor(), MTPint(), MTPlong(), MTPlong(), MTPlong());
+		if (const auto session = maybeSession()) {
+			session->data().processUser(user);
+		} else {
+			createSession(user);
+		}
+		local().writeMtpData(); // Existing encrypted account storage.
+		Local::sync();
+	};
 }
 
-bool Account::checkForNewSession(const MTP::Response &message) {
-	auto newSession = MTPNewSession();
-	auto from = message.reply.constData();
-	if (!newSession.read(from, from + message.reply.size())) {
-		return false;
-	}
-	_mtpNewSessionCreated.fire({});
-	return true;
+void Account::loginNoveo(QString username, QString password, Fn<void(QString)> fail) {
+	prepareNoveoClient();
+	_noveoLoginFail = std::move(fail);
+	_noveo->login(std::move(username), std::move(password));
+}
+
+void Account::cancelNoveoLogin() {
+	_noveoLoginFail = nullptr;
+	if (_noveo && !sessionExists()) _noveo->clear();
 }
 
 void Account::logOut() {
-	if (_loggingOut) {
-		return;
-	}
+	if (_loggingOut) return;
 	_loggingOut = true;
-	if (_mtp) {
-		_mtp->logout([=] { loggedOut(); });
-	} else {
-		// We log out because we've forgotten passcode.
-		loggedOut();
-	}
+	_noveoLoginFail = nullptr;
+	if (_noveo) _noveo->clear();
+	if (_mtp) _mtp->setNoveoConnected(false);
+	loggedOut();
 }
 
 bool Account::loggingOut() const {
@@ -547,7 +539,6 @@ bool Account::loggingOut() const {
 void Account::forcedLogOut() {
 	if (sessionExists()) {
 		loggedOut();
-		resetAuthorizationKeys();
 	}
 }
 
@@ -557,41 +548,6 @@ void Account::loggedOut() {
 	destroySession(DestroyReason::LoggedOut);
 	local().reset();
 	cSetOtherOnline(0);
-}
-
-void Account::destroyMtpKeys(MTP::AuthKeysList &&keys) {
-	Expects(_mtp != nullptr);
-
-	if (keys.empty()) {
-		return;
-	}
-	if (_mtpForKeysDestroy) {
-		_mtpForKeysDestroy->addKeysForDestroy(std::move(keys));
-		local().writeMtpData();
-		return;
-	}
-	auto destroyFields = MTP::Instance::Fields();
-
-	destroyFields.mainDcId = MTP::Instance::Fields::kNoneMainDc;
-	destroyFields.config = std::make_unique<MTP::Config>(_mtp->config());
-	destroyFields.keys = std::move(keys);
-	destroyFields.deviceModel = Platform::DeviceModelPretty();
-	destroyFields.systemVersion = Platform::SystemVersionPretty();
-	_mtpForKeysDestroy = std::make_unique<MTP::Instance>(
-		MTP::Instance::Mode::KeysDestroyer,
-		std::move(destroyFields));
-	_mtpForKeysDestroy->writeKeysRequests(
-	) | rpl::on_next([=] {
-		local().writeMtpData();
-	}, _mtpForKeysDestroy->lifetime());
-	_mtpForKeysDestroy->allKeysDestroyed(
-	) | rpl::on_next([=] {
-		LOG(("MTP Info: all keys scheduled for destroy are destroyed."));
-		crl::on_main(this, [=] {
-			_mtpForKeysDestroy = nullptr;
-			local().writeMtpData();
-		});
-	}, _mtpForKeysDestroy->lifetime());
 }
 
 void Account::suggestMainDcId(MTP::DcId mainDcId) {
@@ -604,18 +560,7 @@ void Account::suggestMainDcId(MTP::DcId mainDcId) {
 }
 
 void Account::destroyStaleAuthorizationKeys() {
-	Expects(_mtp != nullptr);
-
-	for (const auto &key : _mtp->getKeysForWrite()) {
-		// Disable this for now.
-		if (key->type() == MTP::AuthKey::Type::ReadFromFile) {
-			_mtpKeysToDestroy = _mtp->getKeysForWrite();
-			LOG(("MTP Info: destroying stale keys, count: %1"
-				).arg(_mtpKeysToDestroy.size()));
-			resetAuthorizationKeys();
-			return;
-		}
-	}
+	// Legacy intro callers have no Telegram authorization keys to destroy.
 }
 
 void Account::setHandleLoginCode(Fn<void(QString)> callback) {
@@ -628,15 +573,5 @@ void Account::handleLoginCode(const QString &code) const {
 	}
 }
 
-void Account::resetAuthorizationKeys() {
-	Expects(_mtp != nullptr);
-
-	{
-		const auto old = base::take(_mtp);
-		auto config = std::make_unique<MTP::Config>(old->config());
-		startMtp(std::move(config));
-	}
-	local().writeMtpData();
-}
 
 } // namespace Main
