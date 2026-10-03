@@ -23,6 +23,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def fingerprint(root):
+    result = hashlib.sha256()
+    for name in (".ninja_log", ".ninja_deps"):
+        path = root / "out" / name
+        result.update(path.read_bytes() if path.exists() else b"missing")
+    return result.hexdigest()
+
+
 def save(root, manifest):
     records = {
         name: [digest(path), path.stat().st_mtime_ns]
@@ -31,9 +39,18 @@ def save(root, manifest):
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(json.dumps(records), encoding="utf-8")
     print(f"Recorded {len(records)} build inputs.")
+    before = root / "out/.noveo-before-build"
+    changed = not before.exists() or before.read_text() != fingerprint(root)
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with open(output, "a", encoding="utf-8") as stream:
+            stream.write(f"changed={str(changed).lower()}\n")
+    print(f"Build outputs changed: {changed}")
 
 
 def restore(root, manifest):
+    before = root / "out/.noveo-before-build"
+    before.parent.mkdir(parents=True, exist_ok=True)
+    before.write_text(fingerprint(root))
     if not manifest.exists():
         print("No previous build input timestamps; initializing cache.")
         return

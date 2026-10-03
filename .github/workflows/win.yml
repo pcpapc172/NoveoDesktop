@@ -8,7 +8,7 @@ permissions:
 
 concurrency:
   group: noveo-windows-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
 
@@ -204,6 +204,7 @@ jobs:
           cmake --build ..\out --config Debug --parallel
 
       - name: Record build inputs.
+        id: inputs
         if: success()
         run: |
           cd %TBUILD%\%REPO_NAME%
@@ -211,7 +212,7 @@ jobs:
           sccache --show-stats
 
       - name: Save incremental build.
-        if: success()
+        if: steps.inputs.outputs.changed == 'true'
         uses: actions/cache/save@v6
         with:
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
@@ -230,5 +231,6 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\
+          compression-level: 1
           retention-days: 14
           if-no-files-found: error

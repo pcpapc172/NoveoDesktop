@@ -8,7 +8,7 @@ permissions:
 
 concurrency:
   group: noveo-linux-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
 
@@ -187,11 +187,12 @@ jobs:
           key: ${{ steps.cache-tdesktop.outputs.cache-primary-key }}
 
       - name: Record build inputs.
+        id: inputs
         if: success()
         run: python3 .github/scripts/build_cache.py save
 
       - name: Save incremental build.
-        if: success()
+        if: steps.inputs.outputs.changed == 'true'
         uses: actions/cache/save@v6
         with:
           path: out
@@ -223,5 +224,6 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: out/Debug/artifact/
+          compression-level: 1
           retention-days: 14
           if-no-files-found: error
