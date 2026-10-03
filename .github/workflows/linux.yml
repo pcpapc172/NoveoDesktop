@@ -1,54 +1,21 @@
-name: Linux.
+name: NoveoDesktop Linux Debug
 
 on:
-  push:
-    # Pushes to the canary branches run only canary.yml, see there.
-    branches-ignore:
-      - public-canary
-      - private-canary
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/linux.yml'
-      - 'snap/**'
-      - 'Telegram/build/**'
-      - '!Telegram/build/docker/centos_env/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.bat'
-      - 'Telegram/Telegram.plist'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/linux.yml'
-      - 'snap/**'
-      - 'Telegram/build/**'
-      - '!Telegram/build/docker/centos_env/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/Resources/winrc/**'
-      - 'Telegram/SourceFiles/platform/win/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.bat'
-      - 'Telegram/Telegram.plist'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noveo-linux-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
   linux:
     name: Rocky Linux 8
-    runs-on: ${{ (github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/nightly') && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     strategy:
       matrix:
@@ -136,9 +103,9 @@ jobs:
           if [ -n "${{ matrix.defines }}" ]; then
             DEFINE="-D ${{ matrix.defines }}=ON"
             echo Define from matrix: $DEFINE
-            echo "ARTIFACT_NAME=Telegram ${{ matrix.defines }}" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-Debug ${{ matrix.defines }}" >> $GITHUB_ENV
           else
-            echo "ARTIFACT_NAME=Telegram" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-Debug" >> $GITHUB_ENV
           fi
 
           ccache -z
@@ -212,4 +179,5 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: out/Debug/artifact/
-          retention-days: 1
+          retention-days: 14
+          if-no-files-found: error

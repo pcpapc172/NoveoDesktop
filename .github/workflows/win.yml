@@ -1,65 +1,27 @@
-name: Windows.
+name: NoveoDesktop Windows Debug
 
 on:
-  push:
-    # Pushes to the canary branches run only canary.yml, see there.
-    branches-ignore:
-      - public-canary
-      - private-canary
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '!docs/building-win*.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/win.yml'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/docker/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.sh'
-      - 'Telegram/Telegram.plist'
-  pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - '!docs/building-win*.md'
-      - 'changelog.txt'
-      - 'LEGAL'
-      - 'LICENSE'
-      - '.github/**'
-      - '!.github/workflows/win.yml'
-      - 'lib/xdg/**'
-      - 'snap/**'
-      - 'Telegram/build/docker/**'
-      - 'Telegram/Resources/uwp/**'
-      - 'Telegram/SourceFiles/platform/linux/**'
-      - 'Telegram/SourceFiles/platform/mac/**'
-      - 'Telegram/Telegram/**'
-      - 'Telegram/configure.sh'
-      - 'Telegram/Telegram.plist'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: noveo-windows-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
   windows:
     name: Windows
-    runs-on: ${{ matrix.arch == 'arm64' && 'windows-11-arm' || ((github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/nightly') && 'depot-windows-latest-16' || 'windows-latest') }}
+    runs-on: windows-latest
+    timeout-minutes: 360
 
     strategy:
       matrix:
-        arch: [x64_x86, x64, arm64]
-        qt: ["", qt6]
-        generator: ["", "Ninja Multi-Config"]
-        exclude:
-          - arch: arm64
-            qt: ""
-          - arch: x64_x86
-            qt: qt6
+        arch: [x64]
+        qt: [qt6]
+        generator: ["Ninja Multi-Config"]
 
     env:
       UPLOAD_ARTIFACT: "true"
@@ -105,26 +67,12 @@ jobs:
           git config --global user.email "you@example.com"
           git config --global user.name "Sample"
 
-      - name: Install VS 2026 Build Tools.
-        if: matrix.arch == 'arm64'
-        shell: pwsh
-        run: |
-          $exe = Join-Path $env:RUNNER_TEMP 'vs_buildtools.exe'
-          Invoke-WebRequest -Uri https://aka.ms/vs/18/stable/vs_buildtools.exe -OutFile $exe
-          $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList `
-            '--quiet','--wait','--norestart','--nocache', `
-            '--add','Microsoft.VisualStudio.Workload.VCTools', `
-            '--add','Microsoft.VisualStudio.Component.VC.Tools.ARM64', `
-            '--add','Microsoft.VisualStudio.Component.VC.ATL.ARM64'
-          Remove-Item $exe -Force -ErrorAction SilentlyContinue
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
-
       - uses: Eden-CI/msvc-dev-cmd@master
         name: Native Tools Command Prompt.
         with:
           arch: ${{ matrix.arch }}
           sdk: ${{ env.SDK }}
-          toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
+          toolset: "14.44"
 
       - name: NuGet sources.
         run: |
@@ -169,7 +117,7 @@ jobs:
       - name: Read configuration matrix.
         shell: bash
         run: |
-          ARTIFACT_NAME="Telegram"
+          ARTIFACT_NAME="NoveoDesktop-Windows-Debug"
 
           ARCH=""
           if [ -n "${{ matrix.arch }}" ]; then
@@ -196,14 +144,6 @@ jobs:
 
           [ -n "$GENERATOR" ] && ARCH=""
           echo "TDESKTOP_BUILD_ARCH=$ARCH" >> $GITHUB_ENV
-
-          DEFINE=""
-          if [ -n "${{ matrix.defines }}" ]; then
-            DEFINE="-D ${{ matrix.defines }}=ON"
-            echo "Define from matrix: $DEFINE"
-            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.defines }}"
-          fi
-          echo "TDESKTOP_BUILD_DEFINE=$DEFINE" >> $GITHUB_ENV
 
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
@@ -232,8 +172,7 @@ jobs:
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
-          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
-          %TDESKTOP_BUILD_DEFINE%
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
 
           cmake --build ..\out --config Debug --parallel
 
@@ -250,4 +189,5 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\
-          retention-days: 1
+          retention-days: 14
+          if-no-files-found: error
