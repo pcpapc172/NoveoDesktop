@@ -33,13 +33,28 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Build environment identity.
+        run: echo "BUILD_ENV_KEY=${{ hashFiles('Telegram/build/docker/centos_env/**') }}" >> "$GITHUB_ENV"
+
+      - name: Restore prepared build image.
+        id: cache-image
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/noveo-linux-image
+          key: Linux-build-image-v1-${{ env.BUILD_ENV_KEY }}
+
+      - name: Load prepared build image.
+        if: steps.cache-image.outputs.cache-hit == 'true'
+        run: zstd -dc "$RUNNER_TEMP/noveo-linux-image/image.tar.zst" | docker load
+
+      - name: Compiler cache directory.
+        run: echo "CCACHE_DIR=$RUNNER_TEMP/.tdesktop-cache" >> "$GITHUB_ENV"
+
       - name: First set up.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         run: |
           sudo apt update
           curl -sSL https://install.python-poetry.org | python3 -
-          curl -sSL https://github.com/ccache/ccache/releases/download/v4.13.6/ccache-4.13.6-linux-x86_64-glibc.tar.xz \
-          | sudo tar xJ -C /usr/local/bin --strip-components=1 ccache-4.13.6-linux-x86_64-glibc/ccache
-          echo "CCACHE_DIR=$RUNNER_TEMP/.tdesktop-cache" >> $GITHUB_ENV
           cd Telegram/build/docker/centos_env
           poetry install
           DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
@@ -47,17 +62,20 @@ jobs:
           rm -rf __pycache__
 
       - name: Free up some disk space.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
         with:
           tool-cache: true
 
       - name: Set up Docker Buildx.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         id: setup-buildx
         uses: docker/setup-buildx-action@v4
 
       - name: Libraries cache.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         id: cache-libs
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ runner.temp }}/.buildx-cache
@@ -66,6 +84,7 @@ jobs:
           restore-keys: ${{ runner.OS }}-libs-
 
       - name: Restore Docker cache mounts.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723
         with:
           builder: ${{ steps.setup-buildx.outputs.name }}
@@ -74,18 +93,37 @@ jobs:
           skip-extraction: ${{ steps.cache-libs.outputs.cache-hit }}
 
       - name: Libraries.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         uses: docker/build-push-action@v7
         with:
           context: Telegram/build/docker/centos_env
           load: ${{ env.ONLY_CACHE == 'false' }}
           tags: ${{ env.IMAGE_TAG }}
           cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
-          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
 
-      - name: Move cache.
+      - name: Save prepared build image.
+        if: steps.cache-image.outputs.cache-hit != 'true'
         run: |
-          rm -rf ${{ runner.temp }}/.buildx-cache
-          mv ${{ runner.temp }}/.buildx-cache{-new,}
+          mkdir -p "$RUNNER_TEMP/noveo-linux-image"
+          docker save "$IMAGE_TAG" | zstd -T0 -1 -o "$RUNNER_TEMP/noveo-linux-image/image.tar.zst"
+
+      - name: Cache prepared build image.
+        if: steps.cache-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/noveo-linux-image
+          key: ${{ steps.cache-image.outputs.cache-primary-key }}
+
+      - name: Restore incremental build.
+        id: cache-build
+        uses: actions/cache/restore@v6
+        with:
+          path: out
+          key: Linux-out-v1-${{ env.BUILD_ENV_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: Linux-out-v1-${{ env.BUILD_ENV_KEY }}-
+
+      - name: Restore unchanged input timestamps.
+        run: python3 .github/scripts/build_cache.py restore
 
       - name: Restore Telegram Desktop cache.
         id: cache-tdesktop
@@ -93,7 +131,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-${{ github.run_id }}
+          key: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-
 
       - name: Telegram Desktop build.
@@ -108,7 +146,9 @@ jobs:
             echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-Debug" >> $GITHUB_ENV
           fi
 
-          ccache -z
+          mkdir -p "$CCACHE_DIR"
+          docker run --rm -u "$(id -u)" -v "$CCACHE_DIR:/var/cache/ccache" \
+            "$IMAGE_TAG" ccache -z
 
           docker run --rm \
           -u $(id -u) \
@@ -131,27 +171,31 @@ jobs:
         id: ccache-stats
         if: env.ONLY_CACHE == 'false'
         run: |
-          MISSES=$(ccache --print-stats | sed -n 's/^cache_miss\t//p' | head -1)
+          MISSES=$(docker run --rm -u "$(id -u)" -v "$CCACHE_DIR:/var/cache/ccache" "$IMAGE_TAG" ccache --print-stats | sed -n 's/^cache_miss\t//p' | head -1)
           case "$MISSES" in (*[!0-9]*|'') MISSES=0;; esac
           echo "misses=$MISSES" >> $GITHUB_OUTPUT
           echo "ccache misses this run: $MISSES"
-
-      - name: Trim Telegram Desktop cache.
-        if: >
-          env.ONLY_CACHE == 'false'
-            && github.ref_name == github.event.repository.default_branch
-            && fromJSON(steps.ccache-stats.outputs.misses) > 300
-        run: ccache --evict-older-than 1d
 
       - name: Save Telegram Desktop cache.
         if: >
           env.ONLY_CACHE == 'false'
             && github.ref_name == github.event.repository.default_branch
-            && fromJSON(steps.ccache-stats.outputs.misses) > 300
+            && fromJSON(steps.ccache-stats.outputs.misses) > 0
         uses: actions/cache/save@v6
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ steps.cache-tdesktop.outputs.cache-primary-key }}
+
+      - name: Record build inputs.
+        if: success()
+        run: python3 .github/scripts/build_cache.py save
+
+      - name: Save incremental build.
+        if: success()
+        uses: actions/cache/save@v6
+        with:
+          path: out
+          key: ${{ steps.cache-build.outputs.cache-primary-key }}
 
       - name: Check.
         if: env.ONLY_CACHE == 'false'
@@ -171,8 +215,8 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           cd out/Debug
-          mkdir artifact
-          mv {Telegram,Updater} artifact/
+          mkdir -p artifact
+          cp {Telegram,Updater} artifact/
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.

@@ -27,6 +27,8 @@ jobs:
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
       PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_IDLE_TIMEOUT: "0"
 
     defaults:
       run:
@@ -158,7 +160,30 @@ jobs:
         shell: bash
         run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
+      - name: Compiler cache.
+        uses: Mozilla-Actions/sccache-action@v0.0.11
+
+      - name: Build toolchain identity.
+        shell: bash
+        run: |
+          TOOLCHAIN_KEY=$(printf '%s\n' "$VCToolsVersion" "$(cmake --version)" | sha256sum | cut -d ' ' -f1)
+          echo "TOOLCHAIN_KEY=$TOOLCHAIN_KEY" >> "$GITHUB_ENV"
+
+      - name: Restore incremental build.
+        id: cache-build
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
+          key: Windows-x64-out-v1-${{ env.CACHE_KEY }}-${{ env.TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: Windows-x64-out-v1-${{ env.CACHE_KEY }}-${{ env.TOOLCHAIN_KEY }}-
+
+      - name: Restore unchanged input timestamps.
+        run: |
+          cd %TBUILD%\%REPO_NAME%
+          python .github\scripts\build_cache.py restore
+
       - name: Telegram Desktop build.
+        id: build
         if: env.ONLY_CACHE == 'false'
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram
@@ -171,18 +196,34 @@ jobs:
           -D CMAKE_CONFIGURATION_TYPES=Debug ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          -D CMAKE_C_COMPILER_LAUNCHER=sccache ^
+          -D CMAKE_CXX_COMPILER_LAUNCHER=sccache ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
 
           cmake --build ..\out --config Debug --parallel
+
+      - name: Record build inputs.
+        if: success()
+        run: |
+          cd %TBUILD%\%REPO_NAME%
+          python .github\scripts\build_cache.py save
+          sccache --show-stats
+
+      - name: Save incremental build.
+        if: success()
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
+          key: ${{ steps.cache-build.outputs.cache-primary-key }}
 
       - name: Move artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
         run: |
           set OUT=%TBUILD%\%REPO_NAME%\out\Debug
           mkdir artifact
-          move %OUT%\Telegram.exe artifact/
-          move %OUT%\Updater.exe artifact/
+          copy %OUT%\Telegram.exe artifact/
+          copy %OUT%\Updater.exe artifact/
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
