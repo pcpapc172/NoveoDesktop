@@ -212,12 +212,23 @@ jobs:
             exit 1
           fi
 
-      - name: Move artifact.
+      - name: Stage Linux binaries.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           cd out/Debug
           mkdir -p artifact
           cp {Telegram,Updater} artifact/
+
+      - name: Strip packaged Linux binaries.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        run: |
+          docker run --rm -u "$(id -u)" \
+            -v "$PWD:/usr/src/tdesktop" "$IMAGE_TAG" \
+            strip --strip-unneeded \
+            /usr/src/tdesktop/out/Debug/artifact/Telegram \
+            /usr/src/tdesktop/out/Debug/artifact/Updater
+          ls -lh out/Debug/artifact/{Telegram,Updater}
+
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
