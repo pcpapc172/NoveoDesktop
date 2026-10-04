@@ -607,6 +607,10 @@ void PeerData::updateUserpic(
 }
 
 void PeerData::clearUserpic() {
+	// Noveo supplies avatars as URLs, separately from native profile snapshots.
+	if (std::holds_alternative<PlainUrlLocation>(_userpic.location().file().data)) {
+		return;
+	}
 	setUserpicChecked(PhotoId(), ImageLocation(), false);
 }
 

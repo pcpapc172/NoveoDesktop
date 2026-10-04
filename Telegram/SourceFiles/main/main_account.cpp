@@ -508,10 +508,12 @@ void Account::prepareNoveoClient() {
 	_noveoApi->onAvatar = [this](PeerId id, const QUrl &url) {
 		const auto session = maybeSession();
 		if (!session) return;
-		session->data().peer(id)->setUserpic(
-			Noveo::NativeUserId(url.toString()).bare,
-			ImageLocation(DownloadLocation{ PlainUrlLocation{ url.toString() } }, 640, 640),
-			false);
+		const auto peer = session->data().peer(id);
+		const auto location = url.isEmpty() ? ImageLocation()
+			: ImageLocation(DownloadLocation{ PlainUrlLocation{ url.toString() } }, 640, 640);
+		if (peer->userpicLocation() == location) return;
+		peer->setUserpic(url.isEmpty() ? 0 : Noveo::NativeUserId(url.toString()).bare, location, false);
+		session->changes().peerUpdated(peer, Data::PeerUpdate::Flag::Photo);
 	};
 	_noveo->onMessage = [this](const QJsonObject &message) {
 		_noveoApi->message(message);

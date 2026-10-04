@@ -1061,6 +1061,9 @@ void DocumentData::finishLoad() {
 		return;
 	}
 	setLocation(Core::FileLocation(_loader->fileName()));
+	if (_fileReference.startsWith("noveo:") && _location.check()) {
+		session().local().writeFileLocation(mediaKey(), _location);
+	}
 	setGoodThumbnailDataReady();
 	if (const auto media = activeMediaView()) {
 		media->setBytes(_loader->bytes());
@@ -1745,7 +1748,7 @@ bool DocumentData::isNull() const {
 }
 
 MTPInputDocument DocumentData::mtpInput() const {
-	if (_access) {
+	if (_access || _fileReference.startsWith("noveo:")) {
 		return MTP_inputDocument(
 			MTP_long(id),
 			MTP_long(_access),
@@ -1992,6 +1995,12 @@ bool DocumentData::storyMedia() const {
 
 void DocumentData::setContentUrl(const QString &url) {
 	_url = url;
+	if (_fileReference.startsWith("noveo:") && _location.isEmpty()) {
+		_location = session().local().readFileLocation(mediaKey());
+		if (_location.inMediaCache()) {
+			setLoadedInMediaCacheLocation();
+		}
+	}
 }
 
 void DocumentData::setWebLocation(const WebFileLocation &location) {

@@ -14,6 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonArray>
 #include <QtCore/QMap>
 #include <QtCore/QSet>
+#include <QtCore/QTemporaryDir>
+#include <QtCore/QPointer>
+#include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkAccessManager>
 
 namespace Noveo {
@@ -47,9 +50,26 @@ private:
 		uint64 randomId = 0;
 		PeerId peer;
 	};
+	struct Upload {
+		QTemporaryDir directory;
+		QSet<int> parts;
+		qint64 bytes = 0;
+		qint64 touched = 0;
+	};
+	struct SendGroup {
+		int remaining = 0;
+		QVector<MTPUpdate> updates;
+	};
+	bool mediaRequest(mtpRequestId id, const mtpBuffer &body);
+	void upload(mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done);
+	bool send(mtpRequestId id, PeerId peer, QJsonObject content, uint64 randomId,
+		const MTPInputReplyTo &replyTo = MTPInputReplyTo(), bool hasReply = false);
+	[[nodiscard]] QJsonObject mediaFile(const MTPInputMedia &media) const;
 	void drain();
 	void fail(mtpRequestId id, const QString &reason);
 	void contacts();
+	void gifts();
+	void refreshDialog(PeerId peer);
 	void users(const QJsonArray &users, bool contacts = false);
 	void history(const QJsonArray &chats);
 	[[nodiscard]] MTPUser user(const QJsonObject &profile, bool contact = false);
@@ -72,6 +92,12 @@ private:
 	QTimer _deadline;
 	QMap<mtpRequestId, Pending> _pending;
 	QMap<QString, Send> _sends;
+	QMap<mtpRequestId, SendGroup> _sendGroups;
+	QMap<uint64, std::shared_ptr<Upload>> _uploads;
+	QMap<mtpRequestId, QPointer<QNetworkReply>> _transfers;
+	QMap<uint64, QJsonObject> _files;
+	QMap<int, QJsonObject> _messageContent;
+	QMap<int, QJsonObject> _messageObjects;
 	QMap<mtpRequestId, PeerId> _historyRequests;
 	QSet<mtpRequestId> _historyAnswered;
 	QSet<uint64> _historyExhausted;
@@ -86,7 +112,12 @@ private:
 	QMap<QString, int> _messageIds;
 	QMap<int, QString> _rawMessages;
 	QMap<uint64, QUrl> _avatars;
+	QMap<uint64, int> _readOutbox;
+	QMap<uint64, int> _readInbox;
 	QVector<MTPContact> _contacts;
+	QMap<QString, QJsonObject> _gifts;
+	QJsonArray _deferredChats;
+	bool _giftsLoading = false;
 	QString _self;
 	int _nextMessage = 1000000000;
 	int _olderMessage = 1000000000;

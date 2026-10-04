@@ -4258,6 +4258,11 @@ void Session::documentApplyFields(
 	if (dc != 0 && access != 0) {
 		document->setRemoteLocation(dc, access, fileReference);
 	}
+	if (!access && fileReference.startsWith("noveo:")) {
+		document->setRemoteLocation(0, 0, fileReference);
+		document->setContentUrl(QString::fromUtf8(fileReference.mid(6)));
+		document->setMaybeSupportsStreaming(false);
+	}
 }
 
 not_null<DocumentData*> Session::venueIconDocument(const QString &icon) {

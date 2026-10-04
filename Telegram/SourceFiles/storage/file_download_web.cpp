@@ -529,11 +529,11 @@ webFileLoader::webFileLoader(
 	uint8 cacheTag)
 : FileLoader(
 	session,
-	QString(),
+	to,
 	0,
 	0,
 	UnknownFileLocation,
-	LoadToCacheAsWell,
+	(to.isEmpty() ? LoadToCacheAsWell : LoadToFileOnly),
 	fromCloud,
 	autoLoading,
 	cacheTag)
