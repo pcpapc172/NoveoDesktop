@@ -218,19 +218,27 @@ jobs:
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
           key: ${{ steps.cache-build.outputs.cache-primary-key }}
 
-      - name: Move artifact.
+      - name: Stage Windows binaries.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
+        shell: pwsh
         run: |
-          set OUT=%TBUILD%\%REPO_NAME%\out\Debug
-          mkdir artifact
-          copy %OUT%\Telegram.exe artifact/
-          copy %OUT%\Updater.exe artifact/
+          $ErrorActionPreference = 'Stop'
+          $buildOutput = Join-Path (Join-Path $env:TBUILD $env:REPO_NAME) 'out\Debug'
+          $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifact'
+          New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
+          foreach ($binary in @('Telegram.exe', 'Updater.exe')) {
+            $source = Join-Path $buildOutput $binary
+            if (!(Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Build output is missing: $source"
+            }
+            Copy-Item -LiteralPath $source -Destination $artifactDirectory -Force
+          }
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: (env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly')
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: artifact\
+          path: ${{ github.workspace }}/artifact/
           compression-level: 1
           retention-days: 14
           if-no-files-found: error
