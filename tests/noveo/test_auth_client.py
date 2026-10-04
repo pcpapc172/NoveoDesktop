@@ -22,6 +22,9 @@ async def main():
                         str(ROOT / "Telegram/SourceFiles/noveo/auth_client.cpp"), "-o", str(binary), *flags], check=True)
         seen = []
         async def handler(request):
+            if request.headers.get("Origin") != "https://noveo.ir":
+                return web.Response(status=403, text="Origin not allowed")
+            assert request.headers.get("User-Agent") == "NoveoDesktop/0.1"
             ws = web.WebSocketResponse()
             await ws.prepare(request)
             auth = await ws.receive_json()

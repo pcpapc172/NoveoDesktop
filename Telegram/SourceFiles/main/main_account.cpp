@@ -467,6 +467,9 @@ void Account::startNoveoRuntime(std::unique_ptr<MTP::Config> config) {
 void Account::prepareNoveoClient() {
 	if (_noveo) return;
 	_noveo = std::make_unique<Noveo::AuthClient>();
+	_noveo->onDiagnostic = [](QString message) {
+		LOG(("Noveo: %1").arg(message));
+	};
 	_noveo->onConnectionChanged = [this](bool connected) {
 		if (_mtp) _mtp->setNoveoConnected(connected);
 	};

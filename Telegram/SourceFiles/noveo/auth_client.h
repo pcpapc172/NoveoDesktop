@@ -40,6 +40,7 @@ public:
 	std::function<void(const QJsonObject&)> onAuthenticated;
 	std::function<void(Error)> onError;
 	std::function<void(bool)> onConnectionChanged;
+	std::function<void(QString)> onDiagnostic;
 
 private:
 	void open();

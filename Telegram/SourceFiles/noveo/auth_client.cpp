@@ -42,6 +42,7 @@ AuthClient::AuthClient(QUrl endpoint) : _endpoint(std::move(endpoint)) {
 		_key = bytes.toBase64();
 		_socket.write("GET " + _endpoint.path(QUrl::FullyEncoded).toUtf8()
 			+ " HTTP/1.1\r\nHost: " + _endpoint.authority().toUtf8()
+			+ "\r\nOrigin: https://noveo.ir\r\nUser-Agent: NoveoDesktop/0.1"
 			+ "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: "
 			+ _key + "\r\nSec-WebSocket-Version: 13\r\n\r\n");
 	});
@@ -129,6 +130,10 @@ bool AuthClient::upgrade() {
 		return false;
 	}
 	const auto lines = _incoming.left(end).split('\n');
+	if (onDiagnostic) {
+		onDiagnostic(QStringLiteral("WebSocket upgrade HTTP status: %1")
+			.arg(QString::fromLatin1(lines.value(0).simplified().split(' ').value(1))));
+	}
 	const auto expected = QCryptographicHash::hash(_key + kGuid, QCryptographicHash::Sha1).toBase64();
 	auto accepted = false;
 	auto upgradeHeader = false;
@@ -260,6 +265,10 @@ void AuthClient::message(const QByteArray &payload) {
 }
 
 void AuthClient::failed(Error error, bool terminal) {
+	if (onDiagnostic) {
+		onDiagnostic(QStringLiteral("Connection failure: error=%1, upgraded=%2, socket=%3, detail=%4")
+			.arg(int(error)).arg(_upgraded).arg(int(_socket.error())).arg(_socket.errorString()));
+	}
 	const auto reconnect = !terminal && !_authorization.isEmpty();
 	cancel();
 	_pending = {};
