@@ -35,6 +35,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/chat_style.h"
 #include "ui/controls/ton_common.h" // kNanosInOne
 #include "ui/layers/generic_box.h"
+#include "ui/painter.h"
 #include "ui/text/text_utilities.h"
 #include "window/window_session_controller.h"
 #include "styles/style_chat.h"
