@@ -205,14 +205,14 @@ jobs:
 
       - name: Record build inputs.
         id: inputs
-        if: success()
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
         run: |
           cd %TBUILD%\%REPO_NAME%
           python .github\scripts\build_cache.py save
           sccache --show-stats
 
       - name: Save incremental build.
-        if: steps.inputs.outputs.changed == 'true'
+        if: ${{ !cancelled() && steps.inputs.outputs.changed == 'true' }}
         uses: actions/cache/save@v6
         with:
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
