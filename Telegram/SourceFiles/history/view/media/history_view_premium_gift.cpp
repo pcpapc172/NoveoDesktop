@@ -75,7 +75,7 @@ TextWithEntities PremiumGift::title() {
 	const auto info = client ? client->giftDetails(_parent->data()->id.bare) : QJsonObject();
 	if (!info.isEmpty()) {
 		return tr::marked(info.value("kind") == "stars"
-			? tr::lng_noveo_gift_cost(tr::now, lt_count, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
+			? tr::lng_noveo_gift_cost(tr::now, lt_amount, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
 			: info.value("name").toString());
 	}
 	if (tonGift()) {
@@ -147,7 +147,7 @@ TextWithEntities PremiumGift::subtitle() {
 	if (!info.isEmpty()) {
 		return tr::marked(info.value("status") == "claimed" ? tr::lng_noveo_gift_claimed(tr::now)
 			: !info.value("giveawayId").toString().isEmpty() ? tr::lng_noveo_gift_giveaway(tr::now)
-			: tr::lng_noveo_gift_cost(tr::now, lt_count, QString::number(qRound64(info.value("priceTenths").toDouble() / 100.))));
+			: tr::lng_noveo_gift_cost(tr::now, lt_amount, QString::number(qRound64(info.value("priceTenths").toDouble() / 100.))));
 	}
 	if (tonGift()) {
 		return tr::lng_action_gift_got_ton(tr::now, tr::marked);

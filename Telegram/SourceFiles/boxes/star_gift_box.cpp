@@ -2515,7 +2515,7 @@ bool ShowNoveoGiftBox(
 	const auto giveawayId = info.value("giveawayId").toString();
 	const auto claimed = info.value("status") == "claimed";
 	const auto title = stars
-		? tr::lng_noveo_gift_cost(tr::now, lt_count, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
+		? tr::lng_noveo_gift_cost(tr::now, lt_amount, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
 		: info.value("name").toString();
 	const auto price = qRound64(info.value("priceTenths").toDouble() / 100.);
 	const auto perform = [=](QString action, QString id, PeerId target) {
@@ -2533,8 +2533,8 @@ bool ShowNoveoGiftBox(
 		if (!window) return;
 		window->show(MakeConfirmBox({
 			.text = giveaway
-				? tr::lng_noveo_gift_giveaway_confirm(tr::now, lt_name, title, lt_chat, target->name(), lt_count, QString::number(price))
-				: tr::lng_noveo_gift_buy_confirm(tr::now, lt_name, title, lt_count, QString::number(price)),
+				? tr::lng_noveo_gift_giveaway_confirm(tr::now, lt_name, title, lt_chat, target->name(), lt_amount, QString::number(price))
+				: tr::lng_noveo_gift_buy_confirm(tr::now, lt_name, title, lt_amount, QString::number(price)),
 			.confirmed = [=] {
 				perform(giveaway ? "giveaway" : "buy", info.value("giftId").toString(), target->id);
 			},

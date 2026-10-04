@@ -427,10 +427,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_noveo_gift_claimed" = "Already claimed";
 "lng_noveo_gift_buy" = "Buy";
 "lng_noveo_gift_giveaway" = "Giveaway";
-"lng_noveo_gift_buy_confirm" = "Buy {name} for {count} Stars?";
-"lng_noveo_gift_giveaway_confirm" = "Give away {name} in {chat} for {count} Stars?";
+"lng_noveo_gift_buy_confirm" = "Buy {name} for {amount} Stars?";
+"lng_noveo_gift_giveaway_confirm" = "Give away {name} in {chat} for {amount} Stars?";
 "lng_noveo_gift_success" = "Done!";
-"lng_noveo_gift_cost" = "{count} Stars";
+"lng_noveo_gift_cost" = "{amount} Stars";
 
 
 "lng_phone_title" = "Your Phone Number";
