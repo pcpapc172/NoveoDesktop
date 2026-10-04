@@ -22,7 +22,7 @@ int main(int argc, char **argv) {
 		const auto saved = client.authorization();
 		if (saved.contains("password") || saved.value("token") != "test-token") app.exit(12);
 		++successes;
-		if (scenario == "reconnect" && successes == 1) return;
+		if ((scenario == "reconnect" || scenario == "heartbeat") && successes == 1) return;
 		if (scenario == "restore" && successes == 1) {
 			client.restore(saved);
 			return;
@@ -37,7 +37,7 @@ int main(int argc, char **argv) {
 			: scenario == "revoked" ? E::SessionExpired : E::Connection;
 		app.exit(error == expected ? 0 : 14);
 	};
-	QTimer::singleShot(10000, &app, [&] { app.exit(15); });
+	QTimer::singleShot(scenario == "heartbeat" ? 45000 : 10000, &app, [&] { app.exit(15); });
 	if (scenario == "revoked") {
 		client.restore({ { "user", QJsonObject { { "userId", "test-user" } } }, { "token", "test-token" } });
 	} else client.login("test-user", "test-password");

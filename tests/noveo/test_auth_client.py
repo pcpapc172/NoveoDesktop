@@ -25,7 +25,7 @@ async def main():
             if request.headers.get("Origin") != "https://noveo.ir":
                 return web.Response(status=403, text="Origin not allowed")
             assert request.headers.get("User-Agent") == "NoveoDesktop/0.1"
-            ws = web.WebSocketResponse()
+            ws = web.WebSocketResponse(autoping=request.match_info["scenario"] != "heartbeat")
             await ws.prepare(request)
             auth = await ws.receive_json()
             seen.append(auth)
@@ -69,7 +69,7 @@ async def main():
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
         try:
-            for scenario in ("success", "invalid", "rate", "malformed", "fragment", "restore", "reconnect", "revoked", "untrusted"):
+            for scenario in ("success", "invalid", "rate", "malformed", "fragment", "restore", "reconnect", "revoked", "untrusted", "heartbeat"):
                 proc = await asyncio.create_subprocess_exec(str(binary), f"wss://localhost:{port}/{scenario}", scenario, str(cert))
                 code = await proc.wait()
                 assert code == 0, (scenario, code)

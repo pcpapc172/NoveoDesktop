@@ -8,8 +8,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 
 #include "noveo/auth_client.h"
+#include "noveo/session_client.h"
+#include "ui/image/image_location.h"
 #include "lang/lang_keys.h"
-#include <QtCore/QCryptographicHash>
 #include <QtCore/QJsonDocument>
 
 #include "base/platform/base_platform_info.h"
@@ -27,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_config.h"
 #include "mainwidget.h"
 #include "api/api_updates.h"
+#include "apiwrap.h"
 #include "ui/ui_utility.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
@@ -424,6 +426,12 @@ void Account::startNoveoRuntime(std::unique_ptr<MTP::Config> config) {
 	_mtp = std::make_unique<MTP::Instance>(
 		MTP::Instance::Mode::Noveo,
 		std::move(fields));
+	_mtp->setNoveoRequestHandler([this](mtpRequestId id, const mtpBuffer &body) {
+		prepareNoveoClient();
+		_noveoApi->request(id, body);
+	}, [this](mtpRequestId id) {
+		if (_noveoApi) _noveoApi->cancel(id);
+	});
 
 	const auto writingConfig = _lifetime.make_state<bool>(false);
 	rpl::merge(
@@ -475,11 +483,45 @@ void Account::startNoveoRuntime(std::unique_ptr<MTP::Config> config) {
 void Account::prepareNoveoClient() {
 	if (_noveo) return;
 	_noveo = std::make_unique<Noveo::AuthClient>();
+	_noveoApi = std::make_unique<Noveo::SessionClient>(_noveo.get());
+	_noveoApi->onReply = [this](mtpRequestId id, mtpBuffer buffer) {
+		if (!_mtp) return;
+		auto response = MTP::Response();
+		response.requestId = id;
+		response.reply = std::move(buffer);
+		_mtp->processCallback(response);
+	};
+	_noveoApi->onUpdate = [this](const MTPUpdates &updates) {
+		_mtpUpdates.fire_copy(updates);
+	};
+	_noveoApi->onDialogs = [this](const MTPmessages_Dialogs &dialogs) {
+		const auto session = maybeSession();
+		if (!session) return;
+		const auto &data = dialogs.c_messages_dialogs();
+		session->data().processUsers(data.vusers());
+		session->data().processChats(data.vchats());
+		session->data().applyDialogs(nullptr, data.vmessages().v,
+			data.vdialogs().v, int(data.vdialogs().v.size()));
+		session->data().chatsListChanged(nullptr);
+		session->api().requestMoreDialogsIfNeeded();
+	};
+	_noveoApi->onAvatar = [this](PeerId id, const QUrl &url) {
+		const auto session = maybeSession();
+		if (!session) return;
+		session->data().peer(id)->setUserpic(
+			Noveo::NativeUserId(url.toString()).bare,
+			ImageLocation(DownloadLocation{ PlainUrlLocation{ url.toString() } }, 640, 640),
+			false);
+	};
+	_noveo->onMessage = [this](const QJsonObject &message) {
+		_noveoApi->message(message);
+	};
 	_noveo->onDiagnostic = [](QString message) {
 		LOG(("Noveo: %1").arg(message));
 	};
 	_noveo->onConnectionChanged = [this](bool connected) {
 		if (_mtp) _mtp->setNoveoConnected(connected);
+		if (!connected) _noveoApi->disconnected();
 	};
 	_noveo->onError = [this](Noveo::AuthClient::Error error) {
 		using Error = Noveo::AuthClient::Error;
@@ -496,23 +538,8 @@ void Account::prepareNoveoClient() {
 	};
 	_noveo->onAuthenticated = [this](const QJsonObject &profile) {
 		_noveoLoginFail = nullptr;
-		// Native peer ids reserve the bits above 48 for the peer type.
-		const auto digest = QCryptographicHash::hash(
-			profile.value("userId").toString().toUtf8(), QCryptographicHash::Sha256);
-		auto id = uint64();
-		for (auto i = 0; i != 7; ++i) id = (id << 8) | uchar(digest[i]);
-		id = std::max(id & PeerId::kChatTypeMask, uint64(1));
-		const auto username = profile.value("username").toString();
-		const auto name = profile.value("displayName").toString(username);
-		const auto flags = MTPDuser::Flag::f_self | MTPDuser::Flag::f_first_name
-			| MTPDuser::Flag::f_username;
-		const auto user = MTP_user(
-			MTP_flags(flags), MTP_long(id), MTPlong(),
-			MTP_string(name), MTPstring(), MTP_string(username), MTPstring(),
-			MTPUserProfilePhoto(), MTPUserStatus(), MTPint(),
-			MTPVector<MTPRestrictionReason>(), MTPstring(), MTPstring(),
-			MTPEmojiStatus(), MTPVector<MTPUsername>(), MTPRecentStory(),
-			MTPPeerColor(), MTPPeerColor(), MTPint(), MTPlong(), MTPlong(), MTPlong());
+		_noveoApi->authenticated(profile);
+		const auto user = _noveoApi->selfUser();
 		if (const auto session = maybeSession()) {
 			session->data().processUser(user);
 		} else {
@@ -539,6 +566,7 @@ void Account::logOut() {
 	_loggingOut = true;
 	_noveoLoginFail = nullptr;
 	if (_noveo) _noveo->clear();
+	if (_noveoApi) _noveoApi->reset();
 	if (_mtp) _mtp->setNoveoConnected(false);
 	loggedOut();
 }

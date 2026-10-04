@@ -35,6 +35,11 @@ AuthClient::AuthClient(QUrl endpoint) : _endpoint(std::move(endpoint)) {
 	_reconnect.setSingleShot(true);
 	connect(&_timeout, &QTimer::timeout, this, [this] { failed(Error::Timeout); });
 	connect(&_reconnect, &QTimer::timeout, this, [this] { open(); });
+	_heartbeat.setInterval(20000);
+	connect(&_heartbeat, &QTimer::timeout, this, [this] {
+		writeFrame(9, QByteArray("noveo"));
+		_timeout.start(10000);
+	});
 	connect(&_socket, &QSslSocket::encrypted, this, [this] {
 		const auto random = QRandomGenerator::system();
 		auto bytes = QByteArray(16, '\0');
@@ -98,6 +103,7 @@ void AuthClient::cancel() {
 	_upgraded = false;
 	_timeout.stop();
 	_reconnect.stop();
+	_heartbeat.stop();
 	_socket.abort();
 	_incoming.clear();
 	_fragment.clear();
@@ -112,6 +118,12 @@ void AuthClient::clear() {
 
 QJsonObject AuthClient::authorization() const { return _authorization; }
 bool AuthClient::authenticated() const { return _authenticated; }
+
+bool AuthClient::send(const QJsonObject &message) {
+	if (!_authenticated || !_upgraded) return false;
+	writeFrame(1, QJsonDocument(message).toJson(QJsonDocument::Compact));
+	return true;
+}
 
 void AuthClient::readyRead() {
 	_incoming += _socket.readAll();
@@ -204,6 +216,7 @@ bool AuthClient::frames() {
 		} else if (opcode == 9) {
 			writeFrame(10, payload);
 		} else if (opcode == 10) {
+			if (_authenticated && payload == "noveo") _timeout.stop();
 			continue;
 		} else if (opcode == 1 || opcode == 0) {
 			if (opcode == 1 && _fragmented) return false;
@@ -253,14 +266,17 @@ void AuthClient::message(const QByteArray &payload) {
 		_authorization = { { "user", user }, { "token", token } };
 		_authenticated = true;
 		_timeout.stop();
+		_heartbeat.start();
 		if (onConnectionChanged) onConnectionChanged(true);
 		if (onAuthenticated) onAuthenticated(user);
-	} else if (type == "error") {
+	} else if (type == "error" && !_authenticated) {
 		failed(_authorization.isEmpty() ? Error::Credentials : Error::SessionExpired, true);
 	} else if (type == "login_totp_required") {
 		failed(Error::TwoFactorRequired, true);
 	} else if (type == "session_revoked") {
 		failed(Error::SessionExpired, true);
+	} else if (_authenticated && onMessage) {
+		onMessage(object);
 	}
 }
 

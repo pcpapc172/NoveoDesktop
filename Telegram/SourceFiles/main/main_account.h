@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Noveo {
 class AuthClient;
+class SessionClient;
 } // namespace Noveo
 
 namespace Storage {
@@ -149,6 +150,7 @@ private:
 	const std::unique_ptr<Storage::Account> _local;
 
 	std::unique_ptr<Noveo::AuthClient> _noveo;
+	std::unique_ptr<Noveo::SessionClient> _noveoApi;
 	Fn<void(QString)> _noveoLoginFail;
 	std::unique_ptr<MTP::Instance> _mtp;
 	rpl::variable<MTP::Instance*> _mtpValue;

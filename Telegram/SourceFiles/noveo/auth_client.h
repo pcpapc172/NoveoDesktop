@@ -34,6 +34,7 @@ public:
 	void restore(const QJsonObject &authorization, bool connectNow = true);
 	void cancel();
 	void clear();
+	bool send(const QJsonObject &message);
 	[[nodiscard]] QJsonObject authorization() const;
 	[[nodiscard]] bool authenticated() const;
 
@@ -41,6 +42,7 @@ public:
 	std::function<void(Error)> onError;
 	std::function<void(bool)> onConnectionChanged;
 	std::function<void(QString)> onDiagnostic;
+	std::function<void(const QJsonObject&)> onMessage;
 
 private:
 	void open();
@@ -55,6 +57,7 @@ private:
 	QSslSocket _socket;
 	QTimer _timeout;
 	QTimer _reconnect;
+	QTimer _heartbeat;
 	QByteArray _key;
 	QByteArray _incoming;
 	QByteArray _fragment;

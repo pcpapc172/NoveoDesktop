@@ -166,6 +166,8 @@ public:
 	[[nodiscard]] not_null<Session*> getSession(ShiftedDcId shiftedDcId);
 
 	void setNoveoConnected(bool connected);
+	Fn<void(mtpRequestId, const mtpBuffer&)> noveoRequestHandler;
+	Fn<void(mtpRequestId)> noveoCancelHandler;
 	bool isNoveo() const { return _mode == Mode::Noveo; }
 
 	bool isNormal() const {
@@ -669,6 +671,7 @@ void Instance::Private::ping() {
 
 void Instance::Private::cancel(mtpRequestId requestId) {
 	if (!requestId) return;
+	if (isNoveo() && noveoCancelHandler) noveoCancelHandler(requestId);
 
 	DEBUG_LOG(("MTP Info: Cancel request %1.").arg(requestId));
 	const auto shiftedDcId = queryRequestByDc(requestId);
@@ -1033,9 +1036,16 @@ void Instance::Private::sendRequest(
 		request->requestId = requestId;
 		storeRequest(requestId, request, std::move(callbacks));
 		InvokeQueued(_instance, [=, this] {
+			if (!getRequest(requestId)) return;
+			if (noveoRequestHandler) {
+				auto body = mtpBuffer();
+				request.write(body);
+				noveoRequestHandler(requestId, body);
+				return;
+			}
 			auto response = Response();
 			response.requestId = requestId;
-			MTP_rpc_error(MTP_int(406), MTP_string("NOVEO_METHOD_UNSUPPORTED")).write(response.reply);
+			MTPRpcError(MTP_rpc_error(MTP_int(406), MTP_string("NOVEO_METHOD_UNSUPPORTED"))).write(response.reply);
 			processCallback(response);
 		});
 		return;
@@ -2003,6 +2013,13 @@ void Instance::Private::setNoveoConnected(bool connected) {
 
 void Instance::setNoveoConnected(bool connected) {
 	_private->setNoveoConnected(connected);
+}
+
+void Instance::setNoveoRequestHandler(
+		Fn<void(mtpRequestId, const mtpBuffer&)> handler,
+		Fn<void(mtpRequestId)> cancelled) {
+	_private->noveoRequestHandler = std::move(handler);
+	_private->noveoCancelHandler = std::move(cancelled);
 }
 
 void Instance::ping() {

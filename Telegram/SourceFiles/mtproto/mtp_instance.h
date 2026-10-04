@@ -96,6 +96,9 @@ public:
 	QString dctransport(ShiftedDcId shiftedDcId = 0);
 	void ping();
 	void setNoveoConnected(bool connected);
+	void setNoveoRequestHandler(
+		Fn<void(mtpRequestId, const mtpBuffer&)> handler,
+		Fn<void(mtpRequestId)> cancelled);
 	void cancel(mtpRequestId requestId);
 	int32 state(mtpRequestId requestId); // < 0 means waiting for such count of ms
 
