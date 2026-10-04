@@ -97,7 +97,8 @@ void ChooseStarGiftRecipient(
 	not_null<Window::SessionController*> controller,
 	PeerId peer,
 	uint64 giftId,
-	int messageId = 0);
+	int messageId = 0,
+	Data::SavedStarGiftId savedId = {});
 
 void ShowStarGiftBox(
 	not_null<Window::SessionController*> controller,

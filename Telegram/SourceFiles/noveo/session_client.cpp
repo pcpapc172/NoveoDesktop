@@ -304,12 +304,115 @@ std::optional<HistoryRequest> ReadHistory(const mtpBuffer &body) {
 		: std::nullopt;
 }
 
+MTPvector<MTPMessageEntity> Markdown(QString &text) {
+	auto plain = QString();
+	auto entities = QVector<MTPMessageEntity>();
+	for (auto i = 0; i < text.size();) {
+		const auto pre = text.mid(i, 3) == "```";
+		const auto code = !pre && text[i] == '`';
+		const auto bold = text.mid(i, 2) == "**";
+		const auto marker = pre ? QString("```") : code ? QString("`") : bold ? QString("**") : QString();
+		const auto close = marker.isEmpty() ? -1 : text.indexOf(marker, i + marker.size());
+		if (close > i + marker.size()) {
+			auto body = text.mid(i + marker.size(), close - i - marker.size());
+			auto language = QString();
+			if (pre) {
+				const auto newline = body.indexOf('\n');
+				static const auto languagePattern = QRegularExpression("^[A-Za-z0-9_+#.\\-]{0,24}$");
+				if (newline >= 0 && languagePattern.match(body.left(newline).trimmed()).hasMatch()) {
+					language = body.left(newline).trimmed();
+					body = body.mid(newline + 1);
+				}
+				while (body.startsWith('\n') || body.startsWith('\r')) body.remove(0, 1);
+				while (body.endsWith('\n') || body.endsWith('\r')) body.chop(1);
+			}
+			if (!body.isEmpty() && (!code || (!body.contains('\n') && !body.trimmed().isEmpty()))) {
+				const auto offset = MTP_int(plain.size());
+				const auto length = MTP_int(body.size());
+				entities.push_back(pre ? MTPMessageEntity(MTP_messageEntityPre(offset, length, MTP_string(language)))
+					: code ? MTPMessageEntity(MTP_messageEntityCode(offset, length))
+					: MTPMessageEntity(MTP_messageEntityBold(offset, length)));
+				plain += body;
+				i = close + marker.size();
+				continue;
+			}
+		}
+		plain += text[i++];
+	}
+	text = plain;
+	return MTP_vector<MTPMessageEntity>(entities);
+}
+
+QString ToMarkdown(const QString &text, const MTPvector<MTPMessageEntity> &entities) {
+	struct Span {
+		int offset = 0;
+		int length = 0;
+		QString open;
+		QString close;
+		bool code = false;
+	};
+	auto spans = std::vector<Span>();
+	for (const auto &entity : entities.v) {
+		entity.match([&](const MTPDmessageEntityBold &data) {
+			spans.push_back({ data.voffset().v, data.vlength().v, "**", "**" });
+		}, [&](const MTPDmessageEntityCode &data) {
+			spans.push_back({ data.voffset().v, data.vlength().v, "`", "`", true });
+		}, [&](const MTPDmessageEntityPre &data) {
+			spans.push_back({ data.voffset().v, data.vlength().v,
+				"```" + qs(data.vlanguage()) + "\n", "\n```", true });
+		}, [](const auto &) {});
+	}
+	auto inserts = std::vector<std::pair<int, QString>>();
+	for (const auto &span : spans) {
+		if (span.offset < 0 || span.length <= 0 || span.offset > text.size()
+			|| span.length > text.size() - span.offset) continue;
+		if (!span.code && std::any_of(spans.begin(), spans.end(), [&](const Span &other) {
+			return other.code && span.offset >= other.offset
+				&& span.offset + span.length <= other.offset + other.length;
+		})) continue;
+		inserts.emplace_back(span.offset, span.open);
+		inserts.emplace_back(span.offset + span.length, span.close);
+	}
+	std::stable_sort(inserts.begin(), inserts.end(), [](const auto &a, const auto &b) {
+		return a.first > b.first;
+	});
+	auto result = text;
+	for (const auto &[offset, marker] : inserts) result.insert(offset, marker);
+	return result;
+}
+
+MTPReplyMarkup InlineKeyboard(const QJsonObject &content) {
+	auto keyboard = content.value("inlineKeyboard").toArray();
+	if (keyboard.isEmpty()) keyboard = content.value("inline_keyboard").toArray();
+	auto rows = QVector<MTPKeyboardInlineButtonRow>();
+	for (const auto value : keyboard) {
+		auto buttons = QVector<MTPKeyboardInlineButton>();
+		for (const auto entry : value.toArray()) {
+			const auto button = entry.toObject();
+			const auto text = Text(button.value("text"));
+			auto callback = Text(button.value("callbackData"));
+			if (callback.isEmpty()) callback = Text(button.value("callback_data"));
+			const auto url = Text(button.value("url"));
+			if (text.isEmpty() || (callback.isEmpty() && url.isEmpty())) continue;
+			buttons.push_back(MTP_keyboardInlineButton(MTP_flags(MTPDkeyboardInlineButton::Flags()),
+				MTPKeyboardButtonStyle(), MTP_string(text), !callback.isEmpty()
+					? MTPInlineButtonType(MTP_inlineButtonTypeCallback(MTP_flags(MTPDinlineButtonTypeCallback::Flags()), MTP_bytes(callback.toUtf8())))
+					: MTPInlineButtonType(MTP_inlineButtonTypeUrl(MTP_string(url)))));
+		}
+		if (!buttons.isEmpty()) rows.push_back(MTP_keyboardInlineButtonRow(MTP_vector<MTPKeyboardInlineButton>(buttons)));
+	}
+	return rows.isEmpty() ? MTPReplyMarkup(MTP_replyKeyboardHide(MTP_flags(MTPDreplyKeyboardHide::Flags())))
+		: MTPReplyMarkup(MTP_replyInlineMarkup(MTP_flags(MTPDreplyInlineMarkup::Flags()), MTP_vector<MTPKeyboardInlineButtonRow>(rows)));
+}
+
 struct SendRequest {
 	MTPflags<MTPmessages_SendMessage::Flags> flags;
 	MTPInputPeer peer;
 	MTPInputReplyTo reply;
 	MTPstring text;
 	MTPlong random;
+	MTPReplyMarkup markup;
+	MTPVector<MTPMessageEntity> entities;
 };
 
 std::optional<SendRequest> ReadSend(const mtpBuffer &body) {
@@ -320,6 +423,10 @@ std::optional<SendRequest> ReadSend(const mtpBuffer &body) {
 			&& (!(result.flags.v & MTPmessages_SendMessage::Flag::f_reply_to)
 				|| result.reply.read(from, end))
 			&& result.text.read(from, end) && result.random.read(from, end)
+			&& (!(result.flags.v & MTPmessages_SendMessage::Flag::f_reply_markup)
+				|| result.markup.read(from, end))
+			&& (!(result.flags.v & MTPmessages_SendMessage::Flag::f_entities)
+				|| result.entities.read(from, end))
 		? std::optional<SendRequest>(std::move(result))
 		: std::nullopt;
 }
@@ -800,11 +907,11 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 	if (!details.isEmpty() && media.type() == mtpc_messageMediaEmpty) {
 		const auto fromPeer = peerIsChannel(peer) ? peerToMTP(peer)
 			: MTPPeer(MTP_peerUser(MTP_long(senderId.bare)));
-		auto action = MTPMessageAction();
+		auto action = MTPMessageAction(MTP_messageActionEmpty());
 		if (details.value("kind") == "stars") {
 			action = MTP_messageActionGiftStars(
 				MTP_flags(MTPDmessageActionGiftStars::Flag::f_transaction_id),
-				MTP_string("XTR"), MTP_long(0),
+				MTP_string("XTR"), MTP_long(qRound64(details.value("amountTenths").toDouble() / 100.)),
 				MTP_long(qRound64(details.value("amountTenths").toDouble() / 100.)),
 				MTPstring(), MTPlong(), MTP_string(Text(details.value("giveawayId"))));
 		} else if (!Text(details.value("imageUrl")).isEmpty()) {
@@ -813,7 +920,7 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 				starGift(details), MTPTextWithEntities(), MTPlong(), MTPint(), MTPlong(),
 				fromPeer, peerToMTP(peer), MTPlong(), MTPstring(), MTPint(), MTPPeer(), MTPint());
 		}
-		if (action.type()) {
+		if (action.type() != mtpc_messageActionEmpty) {
 			auto serviceFlags = MTPDmessageService::Flags(MTPDmessageService::Flag::f_from_id);
 			if (sender == _self) serviceFlags |= MTPDmessageService::Flag::f_out;
 			if (peerIsChannel(peer)) serviceFlags |= MTPDmessageService::Flag::f_post;
@@ -823,6 +930,10 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		}
 	}
 
+	const auto entities = Markdown(text);
+	const auto markup = InlineKeyboard(content.toObject());
+	if (!entities.v.isEmpty()) flags |= MTPDmessage::Flag::f_entities;
+	if (markup.type() == mtpc_replyInlineMarkup) flags |= MTPDmessage::Flag::f_reply_markup;
 	return MTP_message(MTP_flags(flags), MTP_int(id),
 		peerIsChannel(peer) ? peerToMTP(peer) : MTPPeer(MTP_peerUser(MTP_long(senderId.bare))), MTPint(), MTPstring(),
 		MTPPeer(peerToMTP(peer)), MTPPeer(),
@@ -834,8 +945,8 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		MTP_messageReplyHeader(MTP_flags(MTPDmessageReplyHeader::Flag::f_reply_to_msg_id),
 			MTP_int(replyId), MTPPeer(), MTPMessageFwdHeader(), MTPMessageMedia(), MTPint(),
 			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(), MTPint(), MTPbytes()),
-		MTP_int(Date(object)), MTP_string(text), media, MTPReplyMarkup(),
-		MTPVector<MTPMessageEntity>(), MTPint(), MTPint(), MTPMessageReplies(), MTPint(),
+		MTP_int(Date(object)), MTP_string(text), media, markup,
+		entities, MTPint(), MTPint(), MTPMessageReplies(), MTPint(),
 		MTPstring(), MTPlong(), reactions, MTPVector<MTPRestrictionReason>(), MTPint(),
 		MTPint(), MTPlong(), MTPFactCheck(), MTPint(), MTPlong(), MTPSuggestedPost(), MTPint(),
 		MTPstring(), MTPRichMessage());
@@ -1809,12 +1920,12 @@ void SessionClient::giftAction(const QString &action, const QString &giftId, Pee
 	if (_giftActions.contains(key)) return;
 	const auto claim = action == "claim" || action == "claim_stars";
 	if (!_auth->authenticated() || giftId.isEmpty()
-		|| (!claim && action != "buy" && action != "giveaway")) {
+		|| (!claim && action != "buy" && action != "giveaway" && action != "sell")) {
 		done("This gift is not available.");
 		return;
 	}
 	auto body = QJsonObject{{claim ? "giveawayId" : "giftId", giftId}};
-	if (!claim) body.insert("mode", action == "buy" ? "own" : "gift");
+	if (!claim && action != "sell") body.insert("mode", action == "buy" ? "own" : "gift");
 	if (action == "giveaway") {
 		const auto chat = _chatIds.value(peer.value);
 		if (chat.isEmpty()) {
@@ -1826,7 +1937,7 @@ void SessionClient::giftAction(const QString &action, const QString &giftId, Pee
 	_giftActions.insert(key);
 	api(--_internalRequest, claim
 		? (action == "claim_stars" ? "/stars/giveaway/claim" : "/gifts/giveaway/claim")
-		: "/gifts/purchase", body, [=, this](QJsonObject response) {
+		: action == "sell" ? "/gifts/sell" : "/gifts/purchase", body, [=, this](QJsonObject response) {
 			_giftActions.remove(key);
 			_fullProfiles.remove(NativeUserId(_self).bare);
 			done({});
@@ -1869,14 +1980,33 @@ bool SessionClient::featureRequest(mtpRequestId id, const mtpBuffer &body) {
 		|| type == mtpc_payments_getSavedStarGifts || type == mtpc_payments_getStarGifts
 		|| type == mtpc_account_getNotifySettings || type == mtpc_account_updateNotifySettings
 		|| type == mtpc_messages_getMessagesReactions || type == mtpc_messages_getTopReactions
-		|| type == mtpc_messages_getRecentReactions || type == mtpc_photos_getUserPhotos;
+		|| type == mtpc_messages_getRecentReactions || type == mtpc_photos_getUserPhotos
+		|| type == mtpc_messages_getBotCallbackAnswer;
 	if (!supported) return false;
 	if (!_auth->authenticated()) return true;
 	if (_transfers.contains(id) || _reactionRequests.contains(id)) return true;
 	auto from = body.constData() + 1;
 	const auto end = body.constData() + body.size();
 	const auto bad = [&] { _pending.remove(id); fail(id, "NOVEO_BAD_REQUEST"); return true; };
-	if (type == mtpc_messages_setTyping) {
+	if (type == mtpc_messages_getBotCallbackAnswer) {
+		auto flags = MTPint();
+		auto peer = MTPInputPeer();
+		auto message = MTPint();
+		auto data = MTPbytes();
+		if (!flags.read(from, end) || !peer.read(from, end) || !message.read(from, end)
+			|| !(flags.v & 1) || (flags.v & 6) || !data.read(from, end)) return bad();
+		const auto chat = _chatIds.value(inputPeer(peer).value);
+		const auto raw = _rawMessages.value(message.v);
+		if (chat.isEmpty() || raw.isEmpty() || data.v.isEmpty()) return bad();
+		api(id, "/bot/callback", {{"chatId", chat}, {"messageId", raw},
+			{"callbackData", QString::fromUtf8(data.v)}}, [=, this](QJsonObject response) {
+			const auto message = Text(response.value("message"));
+			reply(id, MTPmessages_BotCallbackAnswer(MTP_messages_botCallbackAnswer(
+				MTP_flags(message.isEmpty() ? MTPDmessages_botCallbackAnswer::Flags()
+					: MTPDmessages_botCallbackAnswer::Flags(MTPDmessages_botCallbackAnswer::Flag::f_message)),
+				MTP_string(message), MTPstring(), MTP_int(0))));
+		}, true);
+	} else if (type == mtpc_messages_setTyping) {
 		auto flags = MTPint();
 		auto input = MTPInputPeer();
 		auto top = MTPint();
@@ -2316,7 +2446,7 @@ void SessionClient::drain() {
 			}
 			const auto temp = QUuid::createUuid().toString(QUuid::WithoutBraces);
 			auto frame = QJsonObject{{"type", "message"}, {"clientTempId", temp},
-				{"content", QJsonObject{{"text", qs(request->text)}}}};
+				{"content", QJsonObject{{"text", ToMarkdown(qs(request->text), request->entities)}}}};
 			if (!raw.isEmpty()) {
 				frame.insert("chatId", raw);
 			} else {

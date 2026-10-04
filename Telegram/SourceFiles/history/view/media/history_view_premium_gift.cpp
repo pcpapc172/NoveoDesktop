@@ -25,8 +25,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "history/view/history_view_element.h"
 #include "lang/lang_keys.h"
-#include "main/main_session.h"
+#include "lottie/lottie_icon.h"
 #include "main/main_account.h"
+#include "main/main_session.h"
 #include "noveo/session_client.h"
 #include "settings/sections/settings_credits.h" // Settings::CreditsId
 #include "settings/settings_credits_graphics.h" // GiftedCreditsBox
@@ -373,10 +374,11 @@ void PremiumGift::draw(
 		Painter &p,
 		const PaintContext &context,
 		const QRect &geometry) {
-	if (_sticker) {
+	ensureStickerCreated();
+	if (_noveoStarsAnimation) {
+		_noveoStarsAnimation->paintInCenter(p, geometry);
+	} else if (_sticker) {
 		_sticker->draw(p, context, geometry);
-	} else {
-		ensureStickerCreated();
 	}
 }
 
@@ -437,10 +439,11 @@ std::unique_ptr<StickerPlayer> PremiumGift::stickerTakePlayer(
 }
 
 bool PremiumGift::hasHeavyPart() {
-	return (_sticker ? _sticker->hasHeavyPart() : false);
+	return _noveoStarsAnimation || (_sticker ? _sticker->hasHeavyPart() : false);
 }
 
 void PremiumGift::unloadHeavyPart() {
+	_noveoStarsAnimation.reset();
 	if (_sticker) {
 		_sticker->unloadHeavyPart();
 	}
@@ -491,7 +494,17 @@ int PremiumGift::premiumMonths() const {
 }
 
 void PremiumGift::ensureStickerCreated() const {
-	if (_sticker) {
+	if (_sticker || _noveoStarsAnimation) {
+		return;
+	}
+	const auto client = _parent->history()->session().account().noveoApi();
+	if (client && client->giftDetails(_parent->data()->id.bare).value("kind") == "stars") {
+		_noveoStarsAnimation = std::make_unique<Lottie::Icon>(Lottie::IconDescriptor{
+			.name = u"noveo_stars_gift"_q,
+			.sizeOverride = QSize(st::msgServiceGiftBoxStickerSize, st::msgServiceGiftBoxStickerSize),
+		});
+		_noveoStarsAnimation->animate([=] { _parent->repaint(); }, 0,
+			_noveoStarsAnimation->framesCount() - 1);
 		return;
 	} else if (tonGift()) {
 		const auto &session = _parent->history()->session();

@@ -70,9 +70,9 @@ async def main():
                     await ws.send_json({"type": "user_list_update", "users": [self_user, other_user], "online": ["other-user"]})
                     await ws.send_json({"type": "chat_history", "chats": chats})
                 elif frame["type"] == "message":
-                    assert frame["chatId"] == "direct-chat" and frame["content"]["text"] == "desktop test"
+                    assert frame["chatId"] == "direct-chat" and frame["content"]["text"] == "**desktop** `test`"
                     observed["messages"] += 1
-                    payload = message("sent-1", 1700000010, "test-user", "desktop test")
+                    payload = message("sent-1", 1700000010, "test-user", "**desktop** `test`")
                     payload.update(chatId="direct-chat", clientTempId=frame["clientTempId"])
                     await ws.send_json({"type": "message_sent", "message": payload})
                 elif frame["type"] == "load_older_messages":

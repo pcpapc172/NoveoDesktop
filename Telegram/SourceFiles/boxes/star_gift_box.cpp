@@ -511,6 +511,10 @@ auto GenerateGiftMedia(
 				tr::now,
 				tr::rich);
 		}, [&](const GiftTypeStars &gift) {
+			if (recipient->session().account().noveoApi()) {
+				return tr::marked(tr::lng_noveo_gift_sell_about(
+					tr::now, lt_amount, QString::number(gift.info.stars)));
+			}
 			return data.upgraded
 				? tr::lng_action_gift_got_upgradable_text(tr::now, tr::rich)
 				: (recipient->isSelf() && gift.info.starsToUpgrade)
@@ -2504,7 +2508,8 @@ bool ShowNoveoGiftBox(
 		not_null<Window::SessionController*> controller,
 		PeerId peerId,
 		uint64 giftId,
-		int messageId) {
+		int messageId,
+		Data::SavedStarGiftId savedId) {
 	const auto client = controller->session().account().noveoApi();
 	if (!client) return false;
 	const auto info = messageId ? client->giftDetails(messageId) : client->giftInfo(giftId);
@@ -2518,12 +2523,28 @@ bool ShowNoveoGiftBox(
 		? tr::lng_noveo_gift_cost(tr::now, lt_amount, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
 		: info.value("name").toString();
 	const auto price = qRound64(info.value("priceTenths").toDouble() / 100.);
+	if (stars) {
+		if (!claimed && !info.value("mine").toBool() && !giveawayId.isEmpty()) {
+			client->giftAction("claim_stars", giveawayId, peerId, [=](QString error) {
+				if (const auto window = weak.get()) {
+					window->showToast(error.isEmpty() ? tr::lng_noveo_gift_success(tr::now) : error);
+				}
+			});
+		}
+		return true;
+	}
 	const auto perform = [=](QString action, QString id, PeerId target) {
 		const auto window = weak.get();
 		const auto api = window ? window->session().account().noveoApi() : nullptr;
 		if (!api) return;
 		api->giftAction(action, id, target, [=](QString error) {
 			if (const auto window = weak.get()) {
+				if (error.isEmpty() && action == "sell" && savedId) {
+					window->session().data().notifyGiftUpdate({
+						.id = savedId,
+						.action = Data::GiftUpdate::Action::Delete,
+					});
+				}
 				window->showToast(error.isEmpty() ? tr::lng_noveo_gift_success(tr::now) : error);
 			}
 		});
@@ -2555,13 +2576,26 @@ bool ShowNoveoGiftBox(
 					rpl::single(GiftPreviewContent(peer, details))));
 			}
 		}
-		if (!giveawayId.isEmpty()) {
-			const auto label = claimed ? tr::lng_noveo_gift_claimed()
-				: info.value("mine").toBool() ? tr::lng_noveo_gift_giveaway() : tr::lng_noveo_gift_claim();
+		if (!giveawayId.isEmpty() && !claimed && !info.value("mine").toBool()) {
+			const auto label = tr::lng_noveo_gift_claim();
 			box->addButton(label, [=] {
 				if (claimed || info.value("mine").toBool()) return;
 				perform(stars ? "claim_stars" : "claim", giveawayId, peerId);
 				box->closeBox();
+			});
+		}
+		if (savedId && peer->isSelf() && !info.value("giftId").toString().isEmpty()) {
+			box->addButton(tr::lng_noveo_gift_sell(lt_amount, rpl::single(QString::number(price))), [=] {
+				const auto window = weak.get();
+				if (!window) return;
+				window->show(MakeConfirmBox({
+					.text = tr::lng_noveo_gift_sell_confirm(tr::now, lt_name, title, lt_amount, QString::number(price)),
+					.confirmed = [=] {
+						perform("sell", info.value("giftId").toString(), peerId);
+						box->closeBox();
+					},
+					.confirmText = tr::lng_noveo_gift_sell(lt_amount, rpl::single(QString::number(price))),
+				}));
 			});
 		}
 		if (!stars && !info.value("giftId").toString().isEmpty()) {

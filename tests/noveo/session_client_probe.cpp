@@ -69,9 +69,10 @@ int main(int argc, char **argv) {
 				MTPmessages_GetHistory(peer, MTP_int(0), MTP_int(0), MTP_int(0), MTP_int(50),
 					MTP_int(0), MTP_int(0), MTP_long(0)));
 			request(7,
-				MTPmessages_SendMessage(MTP_flags(MTPmessages_SendMessage::Flags()), peer,
+				MTPmessages_SendMessage(MTP_flags(MTPmessages_SendMessage::Flag::f_entities), peer,
 					MTPInputReplyTo(), MTP_string("desktop test"), MTP_long(42), MTPReplyMarkup(),
-					MTPVector<MTPMessageEntity>(), MTPint(), MTPint(), MTPInputPeer(),
+					MTP_vector<MTPMessageEntity>({MTP_messageEntityBold(MTP_int(0), MTP_int(7)),
+						MTP_messageEntityCode(MTP_int(8), MTP_int(4))}), MTPint(), MTPint(), MTPInputPeer(),
 					MTPInputQuickReplyShortcut(), MTPlong(), MTPlong(), MTPSuggestedPost(),
 					MTPInputRichMessage()));
 		} else if (id == 2) {

@@ -2881,7 +2881,7 @@ void ShowSavedStarGiftBox(
 		not_null<PeerData*> owner,
 		const Data::SavedStarGift &data,
 		Fn<std::vector<Data::CreditsHistoryEntry>()> pinned) {
-	if (Ui::ShowNoveoGiftBox(controller, owner->id, data.info.id)) return;
+	if (Ui::ShowNoveoGiftBox(controller, owner->id, data.info.id, 0, data.manageId)) return;
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 		auto entry = SavedStarGiftEntry(owner, data);
 		entry.pinnedSavedGifts = std::move(pinned);

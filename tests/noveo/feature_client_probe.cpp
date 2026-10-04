@@ -36,14 +36,14 @@ int main(int argc, char **argv) {
 	const auto notifyPeer = MTPInputNotifyPeer(MTP_inputNotifyPeer(peer));
 	std::set<int> checks;
 	bool started = false;
-	int emojiId = 0, giftId = 0;
+	int emojiId = 0, giftId = 0, botId = 0;
 	const auto request = [&](int id, const auto &value) {
 		mtpBuffer body;
 		value.write(body);
 		client.request(id, body);
 	};
 	const auto finish = [&] {
-		if (checks.size() == 30) app.exit(0);
+		if (checks.size() == 32) app.exit(0);
 	};
 	const auto reaction = [&](int id, bool big, bool remove) {
 		request(id, MTPmessages_SendReaction(MTP_flags(MTPmessages_SendReaction::Flag::f_reaction
@@ -63,12 +63,29 @@ int main(int argc, char **argv) {
 	client.onReply = [&](int id, mtpBuffer body) {
 		if (id == 1) {
 			const auto result = Decode<MTPmessages_Messages>(body);
-			Assert(result.c_messages_messagesSlice().vmessages().v.size() == 3);
+			Assert(result.c_messages_messagesSlice().vmessages().v.size() == 5);
 			for (const auto &message : result.c_messages_messagesSlice().vmessages().v) {
-				if (message.type() == mtpc_messageService) {
+				if (message.type() == mtpc_messageService && message.c_messageService().vaction().type() == mtpc_messageActionGiftStars) {
+					const auto &stars = message.c_messageService().vaction().c_messageActionGiftStars();
+					Assert(stars.vamount().v == 1000 && stars.vstars().v == 1000);
+				} else if (message.type() == mtpc_messageService) {
 					giftId = message.c_messageService().vid().v;
 					Assert(message.c_messageService().vaction().type() == mtpc_messageActionStarGift);
 					Assert(client.giftDetails(giftId).value("giveawayId") == "giveaway");
+				} else if (qs(message.c_message().vmessage()).startsWith("😀")) {
+					const auto &bot = message.c_message();
+					botId = bot.vid().v;
+					Assert(qs(bot.vmessage()) == "😀 A new login inline\n  code\n**unclosed");
+					Assert(bot.ventities() && bot.ventities()->v.size() == 3);
+					const auto &bold = bot.ventities()->v[0].c_messageEntityBold();
+					Assert(bold.voffset().v == 3 && bold.vlength().v == 11);
+					Assert(bot.ventities()->v[1].type() == mtpc_messageEntityCode);
+					Assert(qs(bot.ventities()->v[2].c_messageEntityPre().vlanguage()) == "cpp");
+					Assert(bot.vreply_markup());
+					const auto &buttons = bot.vreply_markup()->c_replyInlineMarkup().vrows().v[0].c_keyboardInlineButtonRow().vbuttons().v;
+					Assert(buttons.size() == 2);
+					Assert(buttons[0].c_keyboardInlineButton().vtype().c_inlineButtonTypeCallback().vdata().v == "ack:session");
+					Assert(buttons[1].c_keyboardInlineButton().vtype().type() == mtpc_inlineButtonTypeUrl);
 				} else if (qs(message.c_message().vmessage()) == "❤️") {
 					emojiId = message.c_message().vid().v;
 				} else {
@@ -78,7 +95,12 @@ int main(int argc, char **argv) {
 					Assert(!photo.vsizes().v.front().c_photoCachedSize().vbytes().v.isEmpty());
 				}
 			}
-			Assert(emojiId && giftId);
+			Assert(emojiId && giftId && botId);
+			request(31, MTPmessages_GetBotCallbackAnswer(MTP_flags(MTPmessages_GetBotCallbackAnswer::Flag::f_data),
+				peer, MTP_int(botId), MTP_bytes("ack:session"), MTPInputCheckPasswordSRP()));
+			client.giftAction("sell", "gift-one", PeerId(), [&](QString error) {
+				Assert(error.isEmpty()); checks.insert(108); finish();
+			});
 			request(2, MTPmessages_GetAvailableReactions(MTP_int(0)));
 			request(3, MTPmessages_GetStickerSet(MTP_inputStickerSetAnimatedEmoji(), MTP_int(0)));
 			request(4, MTPmessages_GetStickerSet(MTP_inputStickerSetAnimatedEmojiAnimations(), MTP_int(0)));
@@ -157,6 +179,9 @@ int main(int argc, char **argv) {
 				Assert(reactions.vresults().v.front().c_reactionCount().vchosen_order());
 				reaction(id + 1, id == 23, id == 24);
 			}
+		} else if (id == 31) {
+			const auto result = Decode<MTPmessages_BotCallbackAnswer>(body);
+			Assert(qs(*result.c_messages_botCallbackAnswer().vmessage()) == "Confirmed");
 		} else Assert(false);
 		checks.insert(id); finish();
 	};

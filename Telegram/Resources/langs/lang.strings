@@ -430,6 +430,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_noveo_gift_buy_confirm" = "Buy {name} for {amount} Stars?";
 "lng_noveo_gift_giveaway_confirm" = "Give away {name} in {chat} for {amount} Stars?";
 "lng_noveo_gift_success" = "Done!";
+"lng_noveo_gift_sell" = "Sell for {amount} Stars";
+"lng_noveo_gift_sell_about" = "Display this gift on your profile or sell it for {amount} Stars.";
+"lng_noveo_gift_sell_confirm" = "Sell {name} for {amount} Stars?";
 "lng_noveo_gift_cost" = "{amount} Stars";
 
 

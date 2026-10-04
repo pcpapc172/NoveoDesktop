@@ -11,6 +11,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_service_box.h"
 #include "info/peer_gifts/info_peer_gifts_common.h"
 
+namespace Lottie {
+class Icon;
+} // namespace Lottie
+
 namespace Data {
 class MediaGiftBox;
 struct GiftCode;
@@ -71,6 +75,7 @@ private:
 	QImage _badgeCache;
 	Info::PeerGifts::GiftBadge _badgeKey;
 	mutable std::optional<Sticker> _sticker;
+	mutable std::unique_ptr<Lottie::Icon> _noveoStarsAnimation;
 
 };
 

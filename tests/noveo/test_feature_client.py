@@ -34,7 +34,7 @@ async def main():
                         str(ROOT / "Telegram/SourceFiles/noveo/auth_client.cpp"), str(ROOT / "Telegram/lib_tl/tl/tl_basic_types.cpp"), str(scheme) + ".cpp",
                         str(ROOT / "Telegram/SourceFiles/data/data_peer_id.cpp"), "-include", str(tmp / "scheme.h"),
                         "-Wl,--gc-sections", "-o", str(binary), *flags], check=True)
-        observed = {"reaction": [], "typing": [], "purchase": [], "claim": 0, "fave": 0}
+        observed = {"reaction": [], "typing": [], "purchase": [], "claim": 0, "fave": 0, "sell": 0, "callback": 0}
         user = {"userId": "test-user", "username": "Self", "avatarUrl": "https://localhost/avatar.png"}
         other = {"userId": "other-user", "username": "Other"}
         gift = {"giftId": "gift-one", "giftNumber": 1, "name": "Fixture gift", "imageUrl": "https://localhost/gift.gif", "priceTenths": 1000}
@@ -44,6 +44,12 @@ async def main():
                     {"messageId": "photo", "senderId": "other-user", "timestamp": 1700000001, "content": {"file": {
                         "url": "https://localhost/photo.png", "type": "image/png", "size": 100, "thumb": thumb}}},
                     {"messageId": "gift", "senderId": "other-user", "timestamp": 1700000002, "content": {"giftGiveaway": giveaway}}]
+        messages.extend([
+            {"messageId": "stars", "senderId": "test-user", "timestamp": 1700000004,
+             "content": {"starGiveaway": {"giveawayId": "stars-giveaway", "giverUserId": "test-user", "amountTenths": 100000, "status": "claimed"}}},
+            {"messageId": "bot", "senderId": "other-user", "timestamp": 1700000005,
+             "content": {"text": "😀 **A new login** `inline`\n```cpp\n  code\n```\n**unclosed",
+                         "inlineKeyboard": [[{"text": "It was me", "callbackData": "ack:session"}, {"text": "Open", "url": "https://noveo.ir"}]]}}])
         chats = [{"chatId": "group", "chatType": "group", "chatName": "Group", "members": ["test-user", "other-user"], "messages": messages},
                  {"chatId": "channel", "chatType": "channel", "chatName": "Gifts!", "messages": [
                     {"messageId": "channel-gift", "senderId": "system", "timestamp": 1700000003,
@@ -92,6 +98,16 @@ async def main():
             for ws in sockets:
                 await ws.send_json({"type": "message_updated", "chatId": "group", "messageId": "gift", "newContent": {"giftGiveaway": giveaway}})
             return web.json_response({"success": True})
+        async def sell(request):
+            authorize(request)
+            assert await request.json() == {"giftId": "gift-one"}
+            observed["sell"] += 1
+            return web.json_response({"success": True})
+        async def callback(request):
+            authorize(request)
+            assert await request.json() == {"chatId": "group", "messageId": "bot", "callbackData": "ack:session"}
+            observed["callback"] += 1
+            return web.json_response({"success": True, "message": "Confirmed"})
         async def websocket(request):
             ws = web.WebSocketResponse()
             await ws.prepare(request)
@@ -123,6 +139,8 @@ async def main():
                     raise AssertionError(frame)
             return ws
         app = web.Application()
+        app.router.add_post("/gifts/sell", sell)
+        app.router.add_post("/bot/callback", callback)
         app.router.add_get("/ws", websocket)
         app.router.add_get("/user/contacts", contacts)
         app.router.add_get("/user/profile", profile)
@@ -146,7 +164,8 @@ async def main():
         assert observed["reaction"] == [False, True, False], observed
         assert observed["typing"] == ["typing", "emoji_interaction", "emoji_interaction_seen"], observed
         assert observed["claim"] == observed["fave"] == 1 and len(observed["purchase"]) == 2, observed
-        print("PASS thumbnails, channel gift identity, native gift cards/profile paging, reactions and live effects, typing/tap batches, animation packs, favorites, mute/unmute, avatar gallery, gift HTTP failure/duplicate suppression/claim updates")
+        assert observed["sell"] == observed["callback"] == 1, observed
+        print("PASS Markdown UTF-16 entities, bot keyboards/callbacks, Stars header amount, gift sales, thumbnails, channel gift identity, native gift cards/profile paging, reactions and live effects, typing/tap batches, animation packs, favorites, mute/unmute, avatar gallery, gift HTTP failure/duplicate suppression/claim updates")
 
 if __name__ == "__main__":
     asyncio.run(main())

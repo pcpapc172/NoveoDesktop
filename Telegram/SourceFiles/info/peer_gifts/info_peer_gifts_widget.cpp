@@ -40,6 +40,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/animations.h"
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
 #include "mtproto/sender.h"
 #include "window/window_session_controller.h"
@@ -80,7 +81,8 @@ constexpr auto kPreloadButtonRows = 2;
 		.info = gift.info,
 		.from = sender,
 		.date = gift.date,
-		.userpic = unique ? (sender != nullptr) : true,
+		.userpic = !to->session().account().noveoApi()
+			&& (unique ? (sender != nullptr) : true),
 		.pinned = gift.pinned,
 		.hidden = gift.hidden,
 		.mine = to->isSelf(),
