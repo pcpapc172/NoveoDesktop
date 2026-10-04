@@ -235,6 +235,11 @@ ConnectionState::ConnectionState(
 		}
 	}, _lifetime);
 
+	_account->sessionChanges(
+	) | rpl::on_next([=](Main::Session*) {
+		applyState(_state);
+	}, _lifetime);
+
 	if (!Core::UpdaterDisabled()) {
 		Core::UpdateChecker checker;
 		rpl::merge(
@@ -441,7 +446,8 @@ auto ConnectionState::computeLayout(const State &state) const -> Layout {
 	auto result = Layout();
 	result.proxyEnabled = state.useProxy;
 	result.progressShown = (state.type != State::Type::Connected);
-	result.visible = state.exposed
+	result.visible = _account->sessionExists()
+		&& state.exposed
 		&& !state.updateReady
 		&& (state.useProxy
 			|| state.type == State::Type::Connecting

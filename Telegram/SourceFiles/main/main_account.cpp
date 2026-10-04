@@ -446,6 +446,14 @@ void Account::startNoveoRuntime(std::unique_ptr<MTP::Config> config) {
 	});
 
 	if (_sessionUserId && _noveo && !_noveo->authorization().isEmpty()) {
+		// Older Noveo builds used 56 bits, overlapping the native peer type.
+		const auto correctedId = std::max(
+			_sessionUserId.bare & PeerId::kChatTypeMask,
+			uint64(1));
+		if (_sessionUserId.bare != correctedId) {
+			_sessionUserId = correctedId;
+			_sessionUserSerialized.clear();
+		}
 		createSession(
 			_sessionUserId,
 			base::take(_sessionUserSerialized),
@@ -488,12 +496,12 @@ void Account::prepareNoveoClient() {
 	};
 	_noveo->onAuthenticated = [this](const QJsonObject &profile) {
 		_noveoLoginFail = nullptr;
-		// Stable positive native peer id, derived from the backend UUID.
+		// Native peer ids reserve the bits above 48 for the peer type.
 		const auto digest = QCryptographicHash::hash(
 			profile.value("userId").toString().toUtf8(), QCryptographicHash::Sha256);
 		auto id = uint64();
 		for (auto i = 0; i != 7; ++i) id = (id << 8) | uchar(digest[i]);
-		id = std::max(id, uint64(1));
+		id = std::max(id & PeerId::kChatTypeMask, uint64(1));
 		const auto username = profile.value("username").toString();
 		const auto name = profile.value("displayName").toString(username);
 		const auto flags = MTPDuser::Flag::f_self | MTPDuser::Flag::f_first_name
