@@ -2,9 +2,19 @@ name: NoveoDesktop Linux Debug
 
 on:
   workflow_dispatch:
+    inputs:
+      environment_only:
+        description: Publish the build environment without building the app
+        type: boolean
+        default: false
+      build_missing_environment:
+        description: Build dependencies if neither the registry nor cache has them
+        type: boolean
+        default: true
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: noveo-linux-${{ github.ref }}
@@ -23,8 +33,8 @@ jobs:
           - ""
 
     env:
-      UPLOAD_ARTIFACT: "true"
-      ONLY_CACHE: "false"
+      UPLOAD_ARTIFACT: ${{ inputs.environment_only && 'false' || 'true' }}
+      ONLY_CACHE: ${{ inputs.environment_only && 'true' || 'false' }}
       IMAGE_TAG: tdesktop:centos_env
 
     steps:
@@ -34,9 +44,30 @@ jobs:
           submodules: recursive
 
       - name: Build environment identity.
-        run: echo "BUILD_ENV_KEY=${{ hashFiles('Telegram/build/docker/centos_env/**') }}" >> "$GITHUB_ENV"
+        env:
+          BUILD_ENV_HASH: ${{ hashFiles('Telegram/build/docker/centos_env/**') }}
+        run: |
+          echo "BUILD_ENV_KEY=$BUILD_ENV_HASH" >> "$GITHUB_ENV"
+          echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-build:$BUILD_ENV_HASH" >> "$GITHUB_ENV"
+
+      - name: Log in to build image registry.
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Pull registered build image.
+        id: registry-image
+        run: |
+          if docker pull "$REGISTRY_IMAGE"; then
+            docker tag "$REGISTRY_IMAGE" "$IMAGE_TAG"
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Registry image unavailable; trying the prepared image cache."
+          fi
 
       - name: Restore prepared build image.
+        if: steps.registry-image.outputs.available != 'true'
         id: cache-image
         uses: actions/cache/restore@v6
         with:
@@ -47,11 +78,17 @@ jobs:
         if: steps.cache-image.outputs.cache-hit == 'true'
         run: zstd -dc "$RUNNER_TEMP/noveo-linux-image/image.tar.zst" | docker load
 
+      - name: Check permission to rebuild missing environment.
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true' && !inputs.build_missing_environment
+        run: |
+          echo "::error::Neither the registry nor prepared image cache has this environment. Dependency rebuilding was disabled for this run."
+          exit 1
+
       - name: Compiler cache directory.
         run: echo "CCACHE_DIR=$RUNNER_TEMP/.tdesktop-cache" >> "$GITHUB_ENV"
 
       - name: First set up.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         run: |
           sudo apt update
           curl -sSL https://install.python-poetry.org | python3 -
@@ -62,18 +99,18 @@ jobs:
           rm -rf __pycache__
 
       - name: Free up some disk space.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
         with:
           tool-cache: true
 
       - name: Set up Docker Buildx.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         id: setup-buildx
         uses: docker/setup-buildx-action@v4
 
       - name: Libraries cache.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         id: cache-libs
         uses: actions/cache/restore@v6
         with:
@@ -84,7 +121,7 @@ jobs:
           restore-keys: ${{ runner.OS }}-libs-
 
       - name: Restore Docker cache mounts.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723
         with:
           builder: ${{ steps.setup-buildx.outputs.name }}
@@ -93,28 +130,36 @@ jobs:
           skip-extraction: ${{ steps.cache-libs.outputs.cache-hit }}
 
       - name: Libraries.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         uses: docker/build-push-action@v7
         with:
           context: Telegram/build/docker/centos_env
-          load: ${{ env.ONLY_CACHE == 'false' }}
+          load: true
           tags: ${{ env.IMAGE_TAG }}
           cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
 
       - name: Save prepared build image.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/noveo-linux-image"
           docker save "$IMAGE_TAG" | zstd -T0 -1 -o "$RUNNER_TEMP/noveo-linux-image/image.tar.zst"
 
       - name: Cache prepared build image.
-        if: steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/noveo-linux-image
           key: ${{ steps.cache-image.outputs.cache-primary-key }}
 
+      - name: Publish prepared build image to registry.
+        if: steps.registry-image.outputs.available != 'true'
+        run: |
+          docker tag "$IMAGE_TAG" "$REGISTRY_IMAGE"
+          docker push "$REGISTRY_IMAGE"
+          echo "Build environment published: $REGISTRY_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Restore incremental build.
+        if: env.ONLY_CACHE == 'false'
         id: cache-build
         uses: actions/cache/restore@v6
         with:
@@ -123,6 +168,7 @@ jobs:
           restore-keys: Linux-out-v1-${{ env.BUILD_ENV_KEY }}-
 
       - name: Restore unchanged input timestamps.
+        if: env.ONLY_CACHE == 'false'
         run: python3 .github/scripts/build_cache.py restore
 
       - name: Restore Telegram Desktop cache.
@@ -188,7 +234,7 @@ jobs:
 
       - name: Record build inputs.
         id: inputs
-        if: success()
+        if: success() && env.ONLY_CACHE == 'false'
         run: python3 .github/scripts/build_cache.py save
 
       - name: Save incremental build.
