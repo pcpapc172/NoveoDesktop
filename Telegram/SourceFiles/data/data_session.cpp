@@ -4261,7 +4261,7 @@ void Session::documentApplyFields(
 	if (!access && fileReference.startsWith("noveo:")) {
 		document->setRemoteLocation(0, 0, fileReference);
 		document->setContentUrl(QString::fromUtf8(fileReference.mid(6)));
-		document->setMaybeSupportsStreaming(false);
+		document->setNotSupportsStreaming();
 	}
 }
 
