@@ -249,7 +249,9 @@ void LoadCloudFile(
 		if (fromCloud == LoadFromCloudOrLocal) {
 			file.loader->permitLoadFromCloud();
 		}
-		if (file.loader->loadSize() < loadSize) {
+		// HTTP loaders fetch the whole file; their size comes from the reply.
+		if (!v::is<PlainUrlLocation>(file.location.file().data)
+			&& file.loader->loadSize() < loadSize) {
 			file.loader->increaseLoadSize(loadSize, autoLoading);
 		}
 		return;
