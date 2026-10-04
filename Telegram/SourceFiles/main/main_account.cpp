@@ -22,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_chat.h"
+#include "data/data_channel.h"
 #include "data/data_changes.h"
 #include "window/window_controller.h"
 #include "media/audio/media_audio.h"
@@ -500,6 +502,16 @@ void Account::prepareNoveoClient() {
 		const auto &data = dialogs.c_messages_dialogs();
 		session->data().processUsers(data.vusers());
 		session->data().processChats(data.vchats());
+		for (const auto &chat : data.vchats().v) {
+			const auto peerId = chat.match([](const MTPDchannel &c) { return peerFromChannel(c.vid().v); },
+				[](const MTPDchat &c) { return peerFromChat(c.vid().v); },
+				[](const auto &) { return PeerId(); });
+			if (!peerId) continue;
+			const auto peer = session->data().peer(peerId);
+			const auto allowed = Data::AllowedReactions{ .type = Data::AllowedReactionsType::All };
+			if (const auto channel = peer->asChannel()) channel->setAllowedReactions(allowed);
+			if (const auto group = peer->asChat()) group->setAllowedReactions(allowed);
+		}
 		session->data().applyDialogs(nullptr, data.vmessages().v,
 			data.vdialogs().v, int(data.vdialogs().v.size()));
 		session->data().chatsListChanged(nullptr);
@@ -512,6 +524,9 @@ void Account::prepareNoveoClient() {
 		const auto location = url.isEmpty() ? ImageLocation()
 			: ImageLocation(DownloadLocation{ PlainUrlLocation{ url.toString() } }, 640, 640);
 		if (peer->userpicLocation() == location) return;
+		if (!url.isEmpty()) {
+			session->data().processPhoto(Noveo::NativeAvatar(url));
+		}
 		peer->setUserpic(url.isEmpty() ? 0 : Noveo::NativeUserId(url.toString()).bare, location, false);
 		session->changes().peerUpdated(peer, Data::PeerUpdate::Flag::Photo);
 	};

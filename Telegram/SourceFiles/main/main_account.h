@@ -65,6 +65,9 @@ public:
 
 	void loginNoveo(QString username, QString password, Fn<void(QString)> fail);
 	void cancelNoveoLogin();
+	[[nodiscard]] Noveo::SessionClient *noveoApi() const {
+		return _noveoApi.get();
+	}
 
 	void logOut();
 	void forcedLogOut();

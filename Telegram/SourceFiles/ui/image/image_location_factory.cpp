@@ -31,6 +31,17 @@ ImageWithLocation FromPhotoSize(
 		not_null<Main::Session*> session,
 		const MTPDphoto &photo,
 		const MTPPhotoSize &size) {
+	if (photo.vfile_reference().v.startsWith("noveo:")
+		&& size.type() == mtpc_photoCachedSize) {
+		const auto &data = size.c_photoCachedSize();
+		const auto bytes = qba(data.vbytes());
+		return ImageWithLocation{
+			.location = ImageLocation(DownloadLocation{ InMemoryLocation{ bytes } },
+				data.vw().v, data.vh().v),
+			.bytes = bytes,
+			.bytesCount = int(bytes.size()),
+		};
+	}
 	if (!photo.vaccess_hash().v && photo.vfile_reference().v.startsWith("noveo:")
 		&& size.type() == mtpc_photoSize) {
 		const auto &data = size.c_photoSize();

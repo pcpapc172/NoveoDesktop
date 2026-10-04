@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Noveo {
 
 [[nodiscard]] UserId NativeUserId(const QString &rawId);
+[[nodiscard]] MTPPhoto NativeAvatar(const QUrl &url);
 
 // Translates native API data types locally; all network traffic uses Noveo.
 class SessionClient final : public QObject {
@@ -34,6 +35,11 @@ public:
 	void request(mtpRequestId id, const mtpBuffer &body);
 	void cancel(mtpRequestId id);
 	void reset();
+	void giftAction(const QString &action, const QString &giftId, PeerId peer,
+		std::function<void(QString)> done);
+	[[nodiscard]] QJsonObject giftDetails(int messageId) const;
+	[[nodiscard]] QJsonObject giftInfo(uint64 id) const;
+	[[nodiscard]] MTPStarGift starGift(const QJsonObject &info) const;
 
 	std::function<void(mtpRequestId, mtpBuffer)> onReply;
 	std::function<void(const MTPUpdates &)> onUpdate;
@@ -61,6 +67,12 @@ private:
 		QVector<MTPUpdate> updates;
 	};
 	bool mediaRequest(mtpRequestId id, const mtpBuffer &body);
+	bool featureRequest(mtpRequestId id, const mtpBuffer &body);
+	void api(mtpRequestId id, const QString &path, const QJsonObject &body,
+		std::function<void(QJsonObject)> done, bool post = false,
+		std::function<void(QString)> failed = {});
+	[[nodiscard]] MTPPeerNotifySettings notify(PeerId peer = PeerId(), QString category = {}) const;
+	[[nodiscard]] MTPUpdates updates(const QVector<MTPUpdate> &items) const;
 	void upload(mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done);
 	bool send(mtpRequestId id, PeerId peer, QJsonObject content, uint64 randomId,
 		const MTPInputReplyTo &replyTo = MTPInputReplyTo(), bool hasReply = false);
@@ -103,6 +115,8 @@ private:
 	QSet<uint64> _historyExhausted;
 	QMap<uint64, MTPUser> _users;
 	QMap<uint64, QJsonObject> _profiles;
+	QSet<uint64> _fullProfiles;
+	QSet<QString> _giftActions;
 	QMap<uint64, MTPChat> _chats;
 	QMap<uint64, MTPDialog> _dialogs;
 	QMap<uint64, QVector<MTPMessage>> _messages;
@@ -114,6 +128,7 @@ private:
 	QMap<uint64, QUrl> _avatars;
 	QMap<uint64, int> _readOutbox;
 	QMap<uint64, int> _readInbox;
+	QMap<mtpRequestId, int> _reactionRequests;
 	QVector<MTPContact> _contacts;
 	QMap<QString, QJsonObject> _gifts;
 	QJsonArray _deferredChats;
@@ -122,6 +137,7 @@ private:
 	int _nextMessage = 1000000000;
 	int _olderMessage = 1000000000;
 	int _pts = 0;
+	mtpRequestId _internalRequest = 0;
 	bool _historyReady = false;
 	bool _contactsReady = false;
 	bool _contactsLoading = false;

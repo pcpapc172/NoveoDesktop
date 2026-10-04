@@ -48,6 +48,9 @@ async def main():
             assert request.headers.get("X-Auth-Token") == "test-token"
             observed["contacts"] += 1
             return web.json_response({"contacts": [other_user]})
+        async def profile(request):
+            assert request.query["userId"] == "other-user"
+            return web.json_response({"success": True, "profile": other_user})
         async def websocket(request):
             assert request.headers.get("Origin") == "https://noveo.ir"
             ws = web.WebSocketResponse()
@@ -90,6 +93,7 @@ async def main():
         app = web.Application()
         app.router.add_get("/ws", websocket)
         app.router.add_get("/user/contacts", contacts)
+        app.router.add_get("/user/profile", profile)
         runner = web.AppRunner(app)
         await runner.setup()
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

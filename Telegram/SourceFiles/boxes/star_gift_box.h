@@ -93,6 +93,12 @@ void ChooseStarGiftRecipient(
 	not_null<Main::Session*> session,
 	const std::vector<UserId> &exclude = {});
 
+[[nodiscard]] bool ShowNoveoGiftBox(
+	not_null<Window::SessionController*> controller,
+	PeerId peer,
+	uint64 giftId,
+	int messageId = 0);
+
 void ShowStarGiftBox(
 	not_null<Window::SessionController*> controller,
 	not_null<PeerData*> peer);

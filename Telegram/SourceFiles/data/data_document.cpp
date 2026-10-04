@@ -379,6 +379,10 @@ void DocumentData::setattributes(
 				if (was == VideoDocument) {
 					info->type = StickerType::Webm;
 				}
+				if (_fileReference.startsWith("noveo:")
+					&& hasMimeType(u"image/gif"_q)) {
+					info->type = StickerType::Webm;
+				}
 				info->alt = qs(data.valt());
 				UpdateStickerSetIdentifier(info->set, data.vstickerset());
 			}

@@ -73,6 +73,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_single_player.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "noveo/session_client.h"
 #include "menu/gift_resale_filter.h"
 #include "payments/payments_form.h"
 #include "payments/payments_checkout_process.h"
@@ -2496,6 +2498,89 @@ void ChooseStarGiftRecipient(
 			Box<PeerListBox>(std::move(controller), std::move(initBox)),
 			LayerOption::KeepOther);
 	});
+}
+
+bool ShowNoveoGiftBox(
+		not_null<Window::SessionController*> controller,
+		PeerId peerId,
+		uint64 giftId,
+		int messageId) {
+	const auto client = controller->session().account().noveoApi();
+	if (!client) return false;
+	const auto info = messageId ? client->giftDetails(messageId) : client->giftInfo(giftId);
+	if (info.isEmpty()) return false;
+	const auto weak = base::make_weak(controller);
+	const auto peer = controller->session().data().peer(peerId);
+	const auto stars = info.value("kind") == "stars";
+	const auto giveawayId = info.value("giveawayId").toString();
+	const auto claimed = info.value("status") == "claimed";
+	const auto title = stars
+		? tr::lng_noveo_gift_cost(tr::now, lt_count, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
+		: info.value("name").toString();
+	const auto price = qRound64(info.value("priceTenths").toDouble() / 100.);
+	const auto perform = [=](QString action, QString id, PeerId target) {
+		const auto window = weak.get();
+		const auto api = window ? window->session().account().noveoApi() : nullptr;
+		if (!api) return;
+		api->giftAction(action, id, target, [=](QString error) {
+			if (const auto window = weak.get()) {
+				window->showToast(error.isEmpty() ? tr::lng_noveo_gift_success(tr::now) : error);
+			}
+		});
+	};
+	const auto confirm = [=](bool giveaway, not_null<PeerData*> target) {
+		const auto window = weak.get();
+		if (!window) return;
+		window->show(MakeConfirmBox({
+			.text = giveaway
+				? tr::lng_noveo_gift_giveaway_confirm(tr::now, lt_name, title, lt_chat, target->name(), lt_count, QString::number(price))
+				: tr::lng_noveo_gift_buy_confirm(tr::now, lt_name, title, lt_count, QString::number(price)),
+			.confirmed = [=] {
+				perform(giveaway ? "giveaway" : "buy", info.value("giftId").toString(), target->id);
+			},
+			.confirmText = giveaway ? tr::lng_noveo_gift_giveaway() : tr::lng_noveo_gift_buy(),
+		}));
+	};
+	controller->show(Box([=](not_null<GenericBox*> box) {
+		box->setTitle(rpl::single(title));
+		box->setWidth(st::boxWideWidth);
+		if (!stars) {
+			const auto client = controller->session().account().noveoApi();
+			const auto native = client ? Api::FromTL(&controller->session(), client->starGift(info)) : std::nullopt;
+			if (native) {
+				const auto container = box->verticalLayout();
+				const auto details = GiftSendDetails{ .descriptor = GiftTypeStars{ .info = *native } };
+				container->add(object_ptr<PreviewWrap>(container,
+					peer->owner().history(peer->session().userPeerId()),
+					rpl::single(GiftPreviewContent(peer, details))));
+			}
+		}
+		if (!giveawayId.isEmpty()) {
+			const auto label = claimed ? tr::lng_noveo_gift_claimed()
+				: info.value("mine").toBool() ? tr::lng_noveo_gift_giveaway() : tr::lng_noveo_gift_claim();
+			box->addButton(label, [=] {
+				if (claimed || info.value("mine").toBool()) return;
+				perform(stars ? "claim_stars" : "claim", giveawayId, peerId);
+				box->closeBox();
+			});
+		}
+		if (!stars && !info.value("giftId").toString().isEmpty()) {
+			box->addButton(tr::lng_noveo_gift_buy(), [=] { confirm(false, peer); });
+			box->addButton(tr::lng_noveo_gift_giveaway(), [=] {
+				const auto window = weak.get();
+				if (!window) return;
+				window->show(Box<PeerListBox>(std::make_unique<ChooseRecipientBoxController>(
+					&window->session(), [=](not_null<Data::Thread*> thread) {
+						confirm(true, thread->peer());
+					}), [](not_null<PeerListBox*> box) {
+						box->setTitle(tr::lng_noveo_gift_giveaway());
+						box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+					}));
+			});
+		}
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+	}));
+	return true;
 }
 
 void ShowStarGiftBox(
@@ -4981,6 +5066,10 @@ void SendGiftBox(
 		const GiftDescriptor &descriptor,
 		rpl::producer<Data::GiftAuctionState> auctionState) {
 	const auto stars = std::get_if<GiftTypeStars>(&descriptor);
+	if (stars && ShowNoveoGiftBox(window, peer->id, stars->info.id)) {
+		box->closeBox();
+		return;
+	}
 	const auto auction = !!auctionState;
 	const auto limited = stars
 		&& (stars->info.limitedCount > stars->info.limitedLeft)

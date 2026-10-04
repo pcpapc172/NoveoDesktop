@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "main/main_session_settings.h"
 #include "main/main_app_config.h"
 #include "apiwrap.h"
@@ -865,7 +866,7 @@ not_null<UserData*> Session::processUser(const MTPUser &data) {
 			if (!minimal || result->applyMinPhoto()) {
 				if (const auto photo = data.vphoto()) {
 					result->setPhoto(*photo);
-				} else {
+				} else if (!_session->account().noveoApi()) {
 					result->setPhoto(MTP_userProfilePhotoEmpty());
 				}
 			}
@@ -961,7 +962,9 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 		}
 
 		chat->setName(qs(data.vtitle()));
-		chat->setPhoto(data.vphoto());
+		if (data.vphoto().type() != mtpc_chatPhotoEmpty || !_session->account().noveoApi()) {
+			chat->setPhoto(data.vphoto());
+		}
 		chat->date = data.vdate().v;
 
 		if (const auto rights = data.vadmin_rights()) {
@@ -1202,7 +1205,9 @@ not_null<PeerData*> Session::processChat(const MTPChat &data) {
 				: PeerData::StoriesState::HasRead);
 		}
 
-		channel->setPhoto(data.vphoto());
+		if (data.vphoto().type() != mtpc_chatPhotoEmpty || !_session->account().noveoApi()) {
+			channel->setPhoto(data.vphoto());
+		}
 		applyMonoforumLinkedId(
 			channel,
 			data.vlinked_monoforum_id().value_or_empty());
@@ -3840,6 +3845,10 @@ void Session::photoConvert(
 			photoApplyFields(i->second.get(), data);
 		}
 	}
+	if (data.type() == mtpc_photo
+		&& data.c_photo().vfile_reference().v.startsWith("noveo:")) {
+		original->uploadingData = nullptr;
+	}
 	photoApplyFields(original, data);
 }
 
@@ -4251,6 +4260,9 @@ void Session::documentApplyFields(
 		videoThumbnail,
 		isPremiumSticker);
 	document->size = size;
+	if (!access && fileReference.startsWith("noveo:")) {
+		document->setRemoteLocation(0, 0, fileReference);
+	}
 	document->setattributes(attributes);
 
 	// Uses 'type' that is computed from attributes.
@@ -4259,7 +4271,6 @@ void Session::documentApplyFields(
 		document->setRemoteLocation(dc, access, fileReference);
 	}
 	if (!access && fileReference.startsWith("noveo:")) {
-		document->setRemoteLocation(0, 0, fileReference);
 		document->setContentUrl(QString::fromUtf8(fileReference.mid(6)));
 		document->setNotSupportsStreaming();
 	}

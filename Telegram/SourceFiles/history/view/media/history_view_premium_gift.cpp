@@ -26,6 +26,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_element.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "noveo/session_client.h"
 #include "settings/sections/settings_credits.h" // Settings::CreditsId
 #include "settings/settings_credits_graphics.h" // GiftedCreditsBox
 #include "settings/sections/settings_premium.h" // Settings::ShowGiftPremium
@@ -69,6 +71,13 @@ QSize PremiumGift::size() {
 }
 
 TextWithEntities PremiumGift::title() {
+	const auto client = _parent->history()->session().account().noveoApi();
+	const auto info = client ? client->giftDetails(_parent->data()->id.bare) : QJsonObject();
+	if (!info.isEmpty()) {
+		return tr::marked(info.value("kind") == "stars"
+			? tr::lng_noveo_gift_cost(tr::now, lt_count, QString::number(qRound64(info.value("amountTenths").toDouble() / 100.)))
+			: info.value("name").toString());
+	}
 	if (tonGift()) {
 		return tr::lng_gift_ton_amount(
 			tr::now,
@@ -133,6 +142,13 @@ TextWithEntities PremiumGift::author() {
 }
 
 TextWithEntities PremiumGift::subtitle() {
+	const auto client = _parent->history()->session().account().noveoApi();
+	const auto info = client ? client->giftDetails(_parent->data()->id.bare) : QJsonObject();
+	if (!info.isEmpty()) {
+		return tr::marked(info.value("status") == "claimed" ? tr::lng_noveo_gift_claimed(tr::now)
+			: !info.value("giveawayId").toString().isEmpty() ? tr::lng_noveo_gift_giveaway(tr::now)
+			: tr::lng_noveo_gift_cost(tr::now, lt_count, QString::number(qRound64(info.value("priceTenths").toDouble() / 100.))));
+	}
 	if (tonGift()) {
 		return tr::lng_action_gift_got_ton(tr::now, tr::marked);
 	} else if (starGift()) {
@@ -247,6 +263,12 @@ TextWithEntities PremiumGift::subtitle() {
 }
 
 rpl::producer<QString> PremiumGift::button() {
+	const auto client = _parent->history()->session().account().noveoApi();
+	const auto info = client ? client->giftDetails(_parent->data()->id.bare) : QJsonObject();
+	if (!info.isEmpty() && !info.value("giveawayId").toString().isEmpty()) {
+		return info.value("status") == "claimed" ? tr::lng_noveo_gift_claimed()
+			: info.value("mine").toBool() ? tr::lng_noveo_gift_giveaway() : tr::lng_noveo_gift_claim();
+	}
 	return (starGift() && outgoingGift())
 		? tr::lng_sticker_premium_view()
 		: creditsPrize()
@@ -510,6 +532,17 @@ void PremiumGift::ensureStickerCreated() const {
 }
 
 ClickHandlerPtr OpenStarGiftLink(not_null<HistoryItem*> item) {
+	const auto client = item->history()->session().account().noveoApi();
+	if (client && !client->giftDetails(item->id.bare).isEmpty()) {
+		const auto peer = item->history()->peer->id;
+		const auto id = item->id.bare;
+		return std::make_shared<LambdaClickHandler>([=](ClickContext context) {
+			if (const auto window = context.other.value<ClickHandlerContext>().sessionWindow.get()) {
+				if (Ui::ShowNoveoGiftBox(window, peer, 0, id)) return;
+			}
+		});
+	}
+
 	const auto media = item->media();
 	const auto gift = media ? media->gift() : nullptr;
 	if (!gift || gift->type != Data::GiftType::StarGift) {
