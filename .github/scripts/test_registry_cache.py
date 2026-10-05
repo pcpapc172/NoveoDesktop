@@ -86,6 +86,27 @@ class RegistryCacheTest(unittest.TestCase):
             for name in ['perl.exe', 'perl5.44.0.exe', 'perl-alias.exe']:
                 self.assertEqual((restored / 'ThirdParty/msys64/ucrt64/bin' / name).read_bytes(), original.read_bytes())
 
+    def test_pruned_dependency_link_is_skipped_but_missing_files_fail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / 'Libraries/win64/libjxl'
+            research = library / 'third_party/brotli/research'
+            research.mkdir(parents=True)
+            (research / 'dictionary.bin').symlink_to('../enc/dictionary.bin')
+            (library / 'jxl.lib').write_bytes(b'compiled library')
+            archive_path = root / 'snapshot.tar.gz'
+            with tarfile.open(archive_path, 'w:gz', dereference=True) as archive:
+                cache.add_snapshot(archive, root / 'Libraries/win64', 'Libraries/win64')
+            restored = root / 'restored'
+            with tarfile.open(archive_path) as archive:
+                cache.validate(archive, ['Libraries/win64'])
+                self.assertNotIn('Libraries/win64/libjxl/third_party/brotli/research/dictionary.bin', archive.getnames())
+                archive.extractall(restored, filter='data')
+            self.assertEqual((restored / 'Libraries/win64/libjxl/jxl.lib').read_bytes(), b'compiled library')
+            with tarfile.open(root / 'missing.tar', 'w', dereference=True) as archive:
+                with self.assertRaises(FileNotFoundError):
+                    cache.add_snapshot(archive, root / 'missing.lib', 'Libraries/win64/missing.lib')
+
     def test_rejects_paths_outside_snapshot_and_links(self):
         for name, link in [('out/../../escape', False), ('other/file', False), ('/out/file', False), ('out/link', True)]:
             with self.subTest(name=name):

@@ -121,3 +121,9 @@ A missing compatible dependency snapshot requires one intentional warm-up. A per
 The first dependency publication failed validation at `ThirdParty/msys64/ucrt64/bin/perl5.44.0.exe`. Python tar packing preserved a dependency link, but the Windows snapshot extractor intentionally rejects link entries. Packing now uses `dereference=True`, materializing source hardlinks and symbolic file links as regular archive files. Extraction restrictions stay intact. A regression uses an actual hardlinked Perl-style filename and symbolic alias, then validates/extracts the produced snapshot and checks executable contents. Windows registry publication and fresh restore still require CI confirmation after this repair.
 
 To calculate a downloaded artifact checksum on Linux, use `sha256sum NoveoDesktop-Linux-x64-Debug.zip`. This command does not ask for a passphrase.
+
+### Dangling libjxl/Brotli links after cleanup
+
+The next Windows run, `37266833835`, failed when dereferencing `Libraries/win64/libjxl/third_party/brotli/research/dictionary.bin`. Cleanup had removed the target while leaving the source-tree link. Snapshot traversal now skips dangling symbolic links with a notice, materializes valid links, and still raises on missing ordinary files. The regression reproduces the pruned Brotli link and verifies the compiled library is retained and restored. Eight cache tests and workflow lint passed.
+
+If dependency preparation succeeds but GHCR dependency publication fails, the Windows workflow now attempts to preserve ThirdParty, library and Qt snapshots in the existing Actions cache keys. These saves run after a publication failure instead of depending on whole-job success; the next run can restore them as a migration/retry fallback. Actions cache eviction still applies to these emergency copies. Successful publication continues to use durable GHCR snapshots.

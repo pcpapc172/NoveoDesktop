@@ -25,6 +25,16 @@ def validate(archive, paths):
             raise ValueError(f'Links are not allowed in Windows snapshots: {member.name}')
 
 
+def add_snapshot(archive, source, name):
+    if source.is_symlink() and not source.exists():
+        print(f'::notice::Skipping dangling dependency link: {name}')
+        return
+    archive.add(source, arcname=name, recursive=False)
+    if source.is_dir():
+        for child in sorted(source.iterdir()):
+            add_snapshot(archive, child, f'{name}/{child.name}')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation', choices=['pull', 'push'])
@@ -62,7 +72,7 @@ def main():
                     source = args.root / path
                     if not source.is_dir():
                         raise ValueError(f'Snapshot directory missing: {source}')
-                    archive.add(source, arcname=path)
+                    add_snapshot(archive, source, path)
             with tarfile.open(archive_path) as archive:
                 validate(archive, args.paths)
             subprocess.run(['oras', 'push', args.reference,

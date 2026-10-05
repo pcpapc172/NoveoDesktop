@@ -163,6 +163,7 @@ jobs:
         run: throw 'Windows dependencies are missing. Run once with build_missing_environment enabled to publish a durable snapshot.'
 
       - name: Libraries.
+        id: libraries
         run: |
           %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }}
 
@@ -211,10 +212,39 @@ jobs:
         run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Publish dependencies before compiling the app.
+        id: publish-deps
         if: steps.registry-deps.outputs.available != 'true' && github.ref == 'refs/heads/main'
         run: |
           cd %TBUILD%\%REPO_NAME%
           python .github\scripts\registry_cache.py push --reference %REGISTRY_CACHE%:deps-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
+
+      - name: Preserve ThirdParty if registry publication fails.
+        if: ${{ !cancelled() && steps.libraries.outcome == 'success' && steps.publish-deps.outcome == 'failure' && steps.cache-third-party.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+
+      - name: Preserve Libraries if registry publication fails.
+        if: ${{ !cancelled() && steps.libraries.outcome == 'success' && steps.publish-deps.outcome == 'failure' && steps.cache-libs.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}
+
+      - name: Preserve Qt if registry publication fails.
+        if: ${{ !cancelled() && steps.libraries.outcome == 'success' && steps.publish-deps.outcome == 'failure' && steps.cache-qt.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-${{ env.CACHE_KEY }}
 
       - name: Compiler cache.
         uses: Mozilla-Actions/sccache-action@v0.0.11
