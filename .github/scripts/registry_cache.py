@@ -57,7 +57,7 @@ def main():
             output(True)
         else:
             (temporary / 'snapshot.json').write_text(json.dumps(metadata))
-            with tarfile.open(archive_path, 'w:gz', compresslevel=1) as archive:
+            with tarfile.open(archive_path, 'w:gz', compresslevel=1, dereference=True) as archive:
                 for path in args.paths:
                     source = args.root / path
                     if not source.is_dir():

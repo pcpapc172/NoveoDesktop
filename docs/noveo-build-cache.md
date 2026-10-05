@@ -81,7 +81,7 @@ Restore/build/publish order:
 
 Registry publication is restricted to `main`. Dependency snapshots contain `ThirdParty` and `Libraries/win64`; output snapshots contain `out`. They do not archive the entire checkout or its authentication configuration.
 
-`registry_cache.py` packages compressed tar plus a version/key/path manifest. It resolves rolling tags to immutable digests before pulling, validates identity and allowed paths, rejects links/path traversal, and reports unavailable snapshots as cache misses. Registry output snapshots are outside the shared Actions cache quota, although sccache's configured backend remains Actions cache.
+`registry_cache.py` packages compressed tar plus a version/key/path manifest. It resolves rolling tags to immutable digests before pulling, validates identity and allowed paths, stores source hardlinks/symlinks as regular file contents, rejects archive links/path traversal, and reports unavailable snapshots as cache misses. Registry output snapshots are outside the shared Actions cache quota, although sccache's configured backend remains Actions cache.
 
 ### ORAS installation fix
 
@@ -115,3 +115,9 @@ rg -n 'FAILED:|error:|Error:|snapshot|Registry|cache' /tmp/noveo-job.log
 Read the concrete error before rebuilding dependencies. Common failures have included language code generation, private API access, missing Windows link libraries, incomplete Painter headers, ORAS metadata and artifact staging. These are source/workflow issues, not automatically cache misses.
 
 A missing compatible dependency snapshot requires one intentional warm-up. A persistent local or self-hosted runner can retain dependencies/output directly, but no runner provisioning or Google Drive cache integration was performed. Colab GPU capacity does not directly accelerate this CPU-heavy C++ build, and temporary environments do not provide the same persistent build tree.
+
+## 2026-10-05 Windows dependency archive repair
+
+The first dependency publication failed validation at `ThirdParty/msys64/ucrt64/bin/perl5.44.0.exe`. Python tar packing preserved a dependency link, but the Windows snapshot extractor intentionally rejects link entries. Packing now uses `dereference=True`, materializing source hardlinks and symbolic file links as regular archive files. Extraction restrictions stay intact. A regression uses an actual hardlinked Perl-style filename and symbolic alias, then validates/extracts the produced snapshot and checks executable contents. Windows registry publication and fresh restore still require CI confirmation after this repair.
+
+To calculate a downloaded artifact checksum on Linux, use `sha256sum NoveoDesktop-Linux-x64-Debug.zip`. This command does not ask for a passphrase.

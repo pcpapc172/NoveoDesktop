@@ -61,6 +61,31 @@ class RegistryCacheTest(unittest.TestCase):
                 with patch('sys.argv', args), self.assertRaisesRegex(ValueError, 'identity'):
                     cache.main()
 
+    def test_dependency_links_are_archived_as_regular_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binaries = root / 'ThirdParty/msys64/ucrt64/bin'
+            binaries.mkdir(parents=True)
+            original = binaries / 'perl.exe'
+            original.write_bytes(b'fixture executable')
+            os.link(original, binaries / 'perl5.44.0.exe')
+            (binaries / 'perl-alias.exe').symlink_to('perl.exe')
+            restored = root / 'restored'
+            def publish(command, **kwargs):
+                self.assertEqual(command[:2], ['oras', 'push'])
+                with tarfile.open(Path(kwargs['cwd']) / 'snapshot.tar.gz') as archive:
+                    cache.validate(archive, ['ThirdParty'])
+                    for name in ['perl.exe', 'perl5.44.0.exe', 'perl-alias.exe']:
+                        member = archive.getmember('ThirdParty/msys64/ucrt64/bin/' + name)
+                        self.assertTrue(member.isfile(), name)
+                    archive.extractall(restored, filter='data')
+                return subprocess.CompletedProcess(command, 0)
+            args = ['cache', 'push', '--reference', 'ghcr.io/example/cache:deps-test', '--key', 'test', '--root', str(root), '--paths', 'ThirdParty']
+            with patch('sys.argv', args), patch.dict(os.environ, {'GITHUB_REPOSITORY': 'example/repo'}), patch.object(cache.subprocess, 'run', side_effect=publish):
+                cache.main()
+            for name in ['perl.exe', 'perl5.44.0.exe', 'perl-alias.exe']:
+                self.assertEqual((restored / 'ThirdParty/msys64/ucrt64/bin' / name).read_bytes(), original.read_bytes())
+
     def test_rejects_paths_outside_snapshot_and_links(self):
         for name, link in [('out/../../escape', False), ('other/file', False), ('/out/file', False), ('out/link', True)]:
             with self.subTest(name=name):
