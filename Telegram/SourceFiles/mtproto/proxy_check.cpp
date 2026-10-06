@@ -25,9 +25,9 @@ public:
 		_client.onProxyChecked = [this](int ping) {
 			_pingTime = ping;
 			if (ping > 0) {
-				emit connected();
+				Q_EMIT connected();
 			} else {
-				emit error(kErrorCodeOther);
+				Q_EMIT error(kErrorCodeOther);
 			}
 		};
 	}

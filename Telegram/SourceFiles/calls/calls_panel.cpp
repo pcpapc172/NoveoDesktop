@@ -281,7 +281,7 @@ void Panel::savePanelGeometry() {
 void Panel::initWindow() {
 	window()->setAttribute(Qt::WA_OpaquePaintEvent);
 	window()->setAttribute(Qt::WA_NoSystemBackground);
-	window()->setTitle(_user->name());
+	window()->setTitle(_call->displayPeer()->name());
 	window()->setTitleStyle(st::callTitle);
 
 	base::install_event_filter(window().get(), [=](not_null<QEvent*> e) {
@@ -609,7 +609,7 @@ bool Panel::chooseSourceActiveWithAudio() {
 }
 
 bool Panel::chooseSourceWithAudioSupported() {
-	return Webrtc::LoopbackAudioCaptureSupported();
+	return !_call->isNoveo() && Webrtc::LoopbackAudioCaptureSupported();
 }
 
 rpl::lifetime &Panel::chooseSourceInstanceLifetime() {
@@ -717,7 +717,7 @@ void Panel::reinitWithCall(Call *call) {
 	}, _callLifetime);
 	_userpic = std::make_unique<Userpic>(
 		widget(),
-		_user,
+		_call->displayPeer(),
 		std::move(remoteMuted));
 	_outgoingVideoBubble = std::make_unique<VideoBubble>(
 		widget(),
@@ -859,6 +859,10 @@ void Panel::reinitWithCall(Call *call) {
 		}
 	}, _callLifetime);
 
+	_call->noveoParticipantCountValue() | rpl::on_next([=](int) {
+		if (_call && _call->isNoveo()) updateStatusText(_call->state());
+	}, _callLifetime);
+
 	_call->errors(
 	) | rpl::on_next([=](Error error) {
 		const auto text = [=] {
@@ -872,17 +876,17 @@ void Panel::reinitWithCall(Call *call) {
 					_user->name());
 			case ErrorType::NotStartedCall:
 				return tr::lng_call_error_camera_not_started(tr::now);
-				//case ErrorType::NoMicrophone:
-				//	return tr::lng_call_error_no_camera(tr::now);
+				case ErrorType::NoMicrophone:
+				return error.details.isEmpty() ? QString("Microphone is unavailable. You joined muted.") : error.details;
 			case ErrorType::Unknown:
-				return Lang::Hard::CallErrorIncompatible();
+				return error.details.isEmpty() ? Lang::Hard::CallErrorIncompatible() : error.details;
 			}
 			Unexpected("Error type in _call->errors().");
 		}();
 		uiShow()->showToast(text);
 	}, _callLifetime);
 
-	_name->setText(_user->name());
+	_name->setText(_call->displayPeer()->name());
 	updateStatusText(_call->state());
 	updateTextColors();
 
@@ -1019,7 +1023,7 @@ void Panel::initLayout() {
 		// _user may change for the same Panel.
 		return (_call != nullptr) && (update.peer == _user);
 	}) | rpl::on_next([=](const Data::PeerUpdate &update) {
-		_name->setText(_call->user()->name());
+		_name->setText(_call->displayPeer()->name());
 		updateControlsGeometry();
 	}, lifetime());
 
@@ -1887,7 +1891,10 @@ void Panel::updateStatusText(State state) {
 				auto durationMs = _call->getDurationMs();
 				auto durationSeconds = durationMs / 1000;
 				startDurationUpdateTimer(durationMs);
-				return Ui::FormatDurationText(durationSeconds);
+				const auto duration = Ui::FormatDurationText(durationSeconds);
+				return (_call->isNoveo() && !_call->displayPeer()->isUser())
+					? duration + " · " + tr::lng_chat_status_members(tr::now, lt_count, _call->noveoParticipantCount())
+					: duration;
 			}
 			return tr::lng_call_status_ended(tr::now);
 		} break;

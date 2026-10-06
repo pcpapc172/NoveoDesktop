@@ -400,7 +400,7 @@ void TopBar::initControls() {
 			Data::PeerUpdate::Flag::Name
 		) | rpl::filter([=](const Data::PeerUpdate &update) {
 			// _user may change for the same Panel.
-			return (_call != nullptr) && (update.peer == _call->user());
+			return (_call != nullptr) && (update.peer == _call->displayPeer());
 		}) | rpl::on_next([=] {
 			updateInfoLabels();
 		}, lifetime());
@@ -658,8 +658,8 @@ void TopBar::updateInfoLabels() {
 void TopBar::setInfoLabels() {
 	if (const auto call = _call.get()) {
 		const auto user = call->user();
-		const auto fullName = user->name();
-		const auto shortName = user->firstName;
+		const auto fullName = call->displayPeer()->name();
+		const auto shortName = call->displayPeer()->isUser() ? user->firstName : fullName;
 		_fullInfoLabel->setText(fullName);
 		_shortInfoLabel->setText(shortName);
 	} else if (const auto group = _groupCall.get()) {

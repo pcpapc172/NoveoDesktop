@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
 		client.request(id, body);
 	};
 	const auto finish = [&] {
-		if (checks.size() == 32) app.exit(0);
+		if (checks.size() == 35) app.exit(0);
 	};
 	const auto reaction = [&](int id, bool big, bool remove) {
 		request(id, MTPmessages_SendReaction(MTP_flags(MTPmessages_SendReaction::Flag::f_reaction
@@ -103,6 +103,18 @@ int main(int argc, char **argv) {
 				}
 			}
 			Assert(emojiId && giftId && botId);
+			const auto otherPeer = peerFromUser(Noveo::NativeUserId("other-user"));
+			Assert(client.voiceChatId(otherPeer) == "dm");
+			Assert(client.voicePeer("dm", "other-user") == otherPeer);
+			client.voiceToken("group", "fixture-call", [&](QJsonObject token, QString error) {
+				Assert(error.isEmpty() && token.value("participantToken") == "room-only-token");
+				for (const auto type : { "voice_start", "voice_join", "voice_leave" }) {
+					Assert(client.voiceAction({ { "type", type }, { "chatId", "group" }, { "callId", "fixture-call" } }));
+				}
+				checks.insert(140); finish();
+			});
+			request(35, MTPmessages_GetHistory(MTP_inputPeerUser(MTP_long(Noveo::NativeUserId("other-user").bare), MTP_long(0)),
+				MTP_int(0), MTP_int(0), MTP_int(0), MTP_int(50), MTP_int(0), MTP_int(0), MTP_long(0)));
 			request(31, MTPmessages_GetBotCallbackAnswer(MTP_flags(MTPmessages_GetBotCallbackAnswer::Flag::f_data),
 				peer, MTP_int(botId), MTP_bytes("ack:session"), MTPInputCheckPasswordSRP()));
 			client.giftAction("sell", "gift-one", PeerId(), [&](QString error) {
@@ -152,9 +164,23 @@ int main(int argc, char **argv) {
 			Assert(documents.size() == 2);
 			const auto &doc = documents.front().c_document();
 			request(13, MTPmessages_FaveSticker(MTP_inputDocument(doc.vid(), doc.vaccess_hash(), doc.vfile_reference()), MTP_boolTrue()));
+		} else if (id == 35) {
+			const auto result = Decode<MTPmessages_Messages>(body);
+			const auto &messages = result.c_messages_messagesSlice().vmessages().v;
+			Assert(messages.size() == 2);
+			for (const auto &message : messages) {
+				const auto &service = message.c_messageService();
+				const auto &action = service.vaction().c_messageActionPhoneCall();
+				if (service.is_out()) {
+					Assert(action.vduration()->v == 42 && action.vreason()->type() == mtpc_phoneCallDiscardReasonHangup);
+				} else {
+					Assert(!action.vduration() && action.vreason()->type() == mtpc_phoneCallDiscardReasonMissed);
+				}
+			}
 		} else if (id == 6) {
 			const auto result = Decode<MTPusers_UserFull>(body);
 			const auto &full = result.c_users_userFull().vfull_user().c_userFull();
+			Assert(full.is_phone_calls_available());
 			Assert(full.vstargifts_count()->v == 2 && full.vprofile_photo()->c_photo().vdate().v > 0);
 		} else if (id == 7 || id == 14) {
 			const auto result = Decode<MTPpayments_SavedStarGifts>(body);
@@ -206,6 +232,11 @@ int main(int argc, char **argv) {
 			}
 		}
 		finish();
+	};
+	client.onVoiceEvent = [&](const QJsonObject &event) {
+		Assert(event.value("type") == "voice_chat_update");
+		Assert(client.voiceState().value("group").toObject().value("callId") == "fixture-call");
+		checks.insert(141); finish();
 	};
 	client.onDialogs = [&](const MTPmessages_Dialogs &result) {
 		if (started) return;

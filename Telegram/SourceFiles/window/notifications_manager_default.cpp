@@ -516,6 +516,7 @@ Widget::Widget(
 		| Qt::BypassWindowManagerHint
 		| Qt::NoDropShadowWindowHint
 		| Qt::Tool);
+	setAttribute(Qt::WA_ShowWithoutActivating);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
 	setAttribute(Qt::WA_OpaquePaintEvent);
 

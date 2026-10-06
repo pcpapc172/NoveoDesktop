@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "mtproto/sender.h"
+#include <QtCore/QJsonObject>
 
 namespace crl {
 class semaphore;
@@ -58,6 +59,9 @@ struct StartConferenceInfo;
 struct StartOutgoingCallArgs {
 	bool video = false;
 	bool isConfirmed = false;
+	PeerData *noveoPeer = nullptr;
+	QString noveoChatId;
+	QString noveoCallId;
 };
 
 struct StartGroupCallArgs {
@@ -85,6 +89,7 @@ public:
 	Instance();
 	~Instance();
 
+	void handleNoveoEvent(not_null<Main::Session*> session, const QJsonObject &event);
 	void startOutgoingCall(not_null<UserData*> user, StartOutgoingCallArgs);
 	void startOrJoinGroupCall(
 		std::shared_ptr<Ui::Show> show,

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_account.h"
 
 #include "noveo/auth_client.h"
+#include "calls/calls_instance.h"
 #include "noveo/session_client.h"
 #include "ui/image/image_location.h"
 #include "lang/lang_keys.h"
@@ -487,6 +488,9 @@ void Account::prepareNoveoClient() {
 	if (_noveo) return;
 	_noveo = std::make_unique<Noveo::AuthClient>();
 	_noveoApi = std::make_unique<Noveo::SessionClient>(_noveo.get());
+	_noveoApi->onVoiceEvent = [this](const QJsonObject &event) {
+		if (const auto session = maybeSession()) Core::App().calls().handleNoveoEvent(session, event);
+	};
 	_noveoApi->onReply = [this](mtpRequestId id, mtpBuffer buffer) {
 		if (!_mtp) return;
 		auto response = MTP::Response();

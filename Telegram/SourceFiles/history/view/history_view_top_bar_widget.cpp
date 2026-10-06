@@ -53,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "data/data_stories.h"
 #include "data/data_channel.h"
+#include "main/main_account.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "data/data_changes.h"
@@ -78,7 +79,8 @@ namespace {
 constexpr auto kEmojiInteractionSeenDuration = 3 * crl::time(1000);
 
 [[nodiscard]] inline bool HasGroupCallMenu(not_null<PeerData*> peer) {
-	return !peer->isUser()
+	return !peer->session().account().noveoApi()
+		&& !peer->isUser()
 		&& !peer->groupCall()
 		&& peer->canManageGroupCall();
 }
@@ -1428,7 +1430,9 @@ void TopBarWidget::updateControlsVisibility() {
 		&& !_chooseForReportReason);
 	const auto groupCallsEnabled = [&] {
 		if (const auto peer = _activeChat.key.peer()) {
-			if (!peer->isUser() && peer->canManageGroupCall()) {
+			if (peer->session().account().noveoApi()) {
+				return peer->isChat() || (peer->isChannel() && peer->asChannel()->isMegagroup());
+			} else if (!peer->isUser() && peer->canManageGroupCall()) {
 				return true;
 			} else if (const auto call = peer->groupCall()) {
 				return (call->fullCount() == 0);

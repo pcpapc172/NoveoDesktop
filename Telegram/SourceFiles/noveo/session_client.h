@@ -36,6 +36,14 @@ public:
 	void request(mtpRequestId id, const mtpBuffer &body);
 	void cancel(mtpRequestId id);
 	void reset();
+	[[nodiscard]] QString voiceChatId(PeerId peer) const;
+	[[nodiscard]] PeerId voicePeer(const QString &chatId, const QString &callerId) const;
+	[[nodiscard]] QString selfId() const { return _self; }
+	[[nodiscard]] QJsonObject voiceState() const { return _voiceState; }
+	bool voiceAction(QJsonObject action);
+	void voiceToken(QString chatId, QString callId,
+		std::function<void(QJsonObject, QString)> done);
+	std::function<void(const QJsonObject &)> onVoiceEvent;
 	void giftAction(const QString &action, const QString &giftId, PeerId peer,
 		std::function<void(QString)> done);
 	[[nodiscard]] QJsonObject giftDetails(int messageId) const;
@@ -135,6 +143,7 @@ private:
 	QMap<QString, QJsonObject> _gifts;
 	QJsonArray _deferredChats;
 	bool _giftsLoading = false;
+	QJsonObject _voiceState;
 	QString _self;
 	int _nextMessage = 1000000000;
 	int _olderMessage = 1000000000;

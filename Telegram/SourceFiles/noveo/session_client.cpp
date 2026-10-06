@@ -547,6 +547,7 @@ void SessionClient::reset() {
 	_gifts.clear();
 	_deferredChats = {};
 	_giftsLoading = false;
+	_voiceState = {};
 	_self.clear();
 	_historyReady = _contactsReady = false;
 }
@@ -851,6 +852,26 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 			content = parsed.object();
 		}
 	}
+	const auto callLog = content.toObject().value("callLog").toObject();
+	if (peerIsUser(peer) && !callLog.isEmpty()) {
+		const auto caller = Text(callLog.value("startedByUserId"));
+		if (!caller.isEmpty()) {
+			if (!_users.contains(NativeUserId(caller).bare)) users(QJsonArray{QJsonObject{{"userId", caller}, {"username", caller}}});
+			const auto completed = callLog.value("status").toString() == "completed";
+			const auto duration = std::max(0, callLog.value("durationSeconds").toInt());
+			const auto serviceFlags = MTPDmessageService::Flag::f_from_id
+				| (caller == _self ? MTPDmessageService::Flag::f_out : MTPDmessageService::Flag());
+			return MTP_messageService(MTP_flags(serviceFlags), MTP_int(id),
+				MTP_peerUser(MTP_long(NativeUserId(caller).bare)), peerToMTP(peer), MTPPeer(),
+				MTPMessageReplyHeader(), MTP_int(Date(object)), MTP_messageActionPhoneCall(
+					MTP_flags(MTPDmessageActionPhoneCall::Flag::f_reason
+						| (completed ? MTPDmessageActionPhoneCall::Flag::f_duration : MTPDmessageActionPhoneCall::Flag())),
+					MTP_long(NativeUserId(Text(callLog.value("callId"))).bare),
+					completed ? MTPPhoneCallDiscardReason(MTP_phoneCallDiscardReasonHangup())
+						: MTPPhoneCallDiscardReason(MTP_phoneCallDiscardReasonMissed()),
+					MTP_int(duration)), MTPMessageReactions(), MTPint());
+		}
+	}
 	auto text = content.isObject() ? Text(content.toObject().value("text")) : Text(content);
 	if (text.isEmpty()) {
 		text = Text(object.value("text"));
@@ -1115,7 +1136,39 @@ void SessionClient::history(const QJsonArray &chats) {
 
 void SessionClient::message(const QJsonObject &frame) {
 	const auto type = frame.value("type").toString();
-	if (type == "typing" || type == "emoji_interaction" || type == "emoji_interaction_seen") {
+	if (frame.value("activeVoiceChats").isObject()) {
+		_voiceState = frame.value("activeVoiceChats").toObject();
+		if (type != "voice_chat_update" && onVoiceEvent) onVoiceEvent({
+			{ "type", "voice_chat_update" }, { "activeVoiceChats", _voiceState },
+		});
+	}
+	if (type == "incoming_call" || type.startsWith("voice_")) {
+		if (type == "incoming_call") {
+			const auto caller = frame.value("callerId").toString();
+			if (!caller.isEmpty() && !_users.contains(NativeUserId(caller).bare)) {
+				users(QJsonArray{ QJsonObject{ { "userId", caller },
+					{ "username", frame.value("callerName") }, { "avatarUrl", frame.value("callerAvatar") } } });
+				if (onUpdate) onUpdate(updates({}));
+				avatars();
+			}
+		}
+		if (onVoiceEvent) onVoiceEvent(frame);
+	} else if (type == "new_chat_info" || type == "chat_joined") {
+		const auto chat = frame.value("chat").toObject();
+		const auto raw = chat.value("chatId").toString();
+		if (chat.value("chatType").toString() == "private" && !raw.isEmpty()) {
+			for (const auto member : chat.value("members").toArray()) {
+				const auto other = member.isString() ? member.toString() : RawId(member.toObject());
+				if (!other.isEmpty() && other != _self) {
+					const auto peer = peerFromUser(NativeUserId(other));
+					_chatPeers[raw] = peer;
+					_chatIds[peer.value] = raw;
+					break;
+				}
+			}
+		}
+		_auth->send({ { "type", "resync_state" } });
+	} else if (type == "typing" || type == "emoji_interaction" || type == "emoji_interaction_seen") {
 		const auto peer = _chatPeers.value(Text(frame.value("chatId")));
 		const auto sender = Text(frame.value("senderId")).isEmpty() ? Text(frame.value("sender")) : Text(frame.value("senderId"));
 		if (!peer || sender.isEmpty() || sender == _self) return;
@@ -2536,6 +2589,7 @@ void SessionClient::drain() {
 			for (const auto value : _profiles.value(uid).value("gifts").toArray()) giftCount += std::clamp(value.toObject().value("quantity").toInt(1), 1, 1000);
 			const auto full = MTPUserFull(MTP_userFull(MTP_flags(MTPDuserFull::Flag::f_about
 				| MTPDuserFull::Flag::f_stargifts_count | MTPDuserFull::Flag::f_display_gifts_button
+				| MTPDuserFull::Flag::f_phone_calls_available
 				| (photo.type() == mtpc_photo ? MTPDuserFull::Flag::f_profile_photo : MTPDuserFull::Flag())),
 				MTP_long(uid), MTP_string(Text(_profiles.value(uid).value("bio"))),
 				MTP_peerSettings(MTP_flags(MTPDpeerSettings::Flags()), MTPint(), MTPstring(),
@@ -2631,4 +2685,28 @@ void SessionClient::drain() {
 	}
 }
 
+} // namespace Noveo
+
+namespace Noveo {
+QString SessionClient::voiceChatId(PeerId peer) const {
+	const auto chat = _chatIds.value(peer.value);
+	if (!chat.isEmpty()) return chat;
+	const auto user = _rawUsers.value(peer.value);
+	return user.isEmpty() ? QString() : "temp_" + user;
+}
+PeerId SessionClient::voicePeer(const QString &chatId, const QString &callerId) const {
+	return _chatPeers.value(chatId, callerId.isEmpty() ? PeerId() : peerFromUser(NativeUserId(callerId)));
+}
+bool SessionClient::voiceAction(QJsonObject action) {
+	return _auth->send(action);
+}
+void SessionClient::voiceToken(QString chatId, QString callId,
+		std::function<void(QJsonObject, QString)> done) {
+	auto body = QJsonObject{ { "chatId", chatId } };
+	if (!callId.isEmpty()) body.insert("callId", callId);
+	const auto callback = std::make_shared<std::function<void(QJsonObject, QString)>>(std::move(done));
+	api(--_internalRequest, "/voice/token", body,
+		[callback](QJsonObject token) { (*callback)(std::move(token), {}); }, true,
+		[callback](QString error) { (*callback)({}, std::move(error)); });
+}
 } // namespace Noveo

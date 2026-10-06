@@ -28,6 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtCore/QBuffer>
 #include <QtCore/QVersionNumber>
+#include <QtCore/QTimer>
 #include <QtGui/QGuiApplication>
 
 #include <ksandbox.h>
@@ -198,6 +199,7 @@ void MaybePlaySoundForCustom(Fn<void()> playSound) {
 }
 
 void MaybeFlashBounceForCustom(Fn<void()> flashBounce) {
+	if (IsWayland() && CurrentServerInformation.name == "cosmic-notifications") return;
 	flashBounce();
 }
 
@@ -542,7 +544,12 @@ void Manager::Private::init(XdgNotifications::NotificationsProxy proxy) {
 					*/
 					const auto nid = std::get_if<uint>(&notification->id);
 					if (nid && id == *nid && reason == 2) {
-						clearNotification({ key, msgId });
+						// Some daemons emit Closed before ActionInvoked. Keep the
+						// action target briefly, without closing a replacement popup.
+						const auto weak = base::make_weak(notification.get());
+						QTimer::singleShot(5000, crl::guard(this, [=] {
+							if (weak) clearNotification({ key, msgId });
+						}));
 						return;
 					}
 				}
@@ -971,6 +978,11 @@ void Manager::doMaybePlaySound(Fn<void()> playSound) {
 }
 
 void Manager::doMaybeFlashBounce(Fn<void()> flashBounce) {
+	// COSMIC interprets Wayland urgency as an activation request. A message
+	// arrival must never bring the main window to the foreground.
+	if (IsWayland() && CurrentServerInformation.name == "cosmic-notifications") {
+		return;
+	}
 	_private->invokeIfNotInhibited(std::move(flashBounce));
 }
 

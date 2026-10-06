@@ -18,7 +18,7 @@ add_subdirectory(lib_lottie)
 add_subdirectory(lib_qr)
 add_subdirectory(lib_translate)
 add_subdirectory(lib_webrtc)
-add_subdirectory(lib_webview)
+include(cmake/noveo_webview.cmake)
 add_subdirectory(codegen)
 
 get_filename_component(src_loc SourceFiles REALPATH)
@@ -78,6 +78,7 @@ PRIVATE
     tdesktop::td_ui
     tdesktop::td_webauthn
     desktop-app::lib_webrtc
+    desktop-app::external_webrtc
     desktop-app::lib_base
     desktop-app::lib_crl
     desktop-app::lib_ui
@@ -1410,6 +1411,10 @@ PRIVATE
     intro/intro_email.h
     intro/intro_password_check.cpp
     intro/intro_password_check.h
+    noveo/call_client.cpp
+    noveo/call_client.h
+    noveo/call_media.cpp
+    noveo/call_media.h
     noveo/auth_client.cpp
     noveo/auth_client.h
     noveo/session_client.cpp

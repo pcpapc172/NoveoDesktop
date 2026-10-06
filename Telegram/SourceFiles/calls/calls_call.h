@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "base/weak_ptr.h"
+#include <QtCore/QJsonObject>
+#include <QtGui/QImage>
 #include "base/timer.h"
 #include "base/bytes.h"
 #include "mtproto/sender.h"
@@ -38,6 +40,8 @@ enum class VideoState;
 class VideoTrack;
 struct DeviceResolvedId;
 } // namespace Webrtc
+
+namespace Noveo { class CallClient; class CallMedia; }
 
 namespace Calls {
 
@@ -104,7 +108,10 @@ public:
 		not_null<Delegate*> delegate,
 		not_null<UserData*> user,
 		Type type,
-		bool video);
+		bool video,
+		PeerData *displayPeer = nullptr,
+		QString chatId = {},
+		QString callId = {});
 	Call(
 		not_null<Delegate*> delegate,
 		not_null<UserData*> user,
@@ -137,6 +144,12 @@ public:
 	}
 	[[nodiscard]] bool isIncomingWaiting() const;
 
+	[[nodiscard]] not_null<PeerData*> displayPeer() const;
+	[[nodiscard]] bool isNoveo() const { return _noveo != nullptr; }
+	void startNoveo();
+	[[nodiscard]] int noveoParticipantCount() const { return _noveoParticipants.current(); }
+	[[nodiscard]] rpl::producer<int> noveoParticipantCountValue() const { return _noveoParticipants.value(); }
+	void handleNoveoEvent(const QJsonObject &event);
 	void start(bytes::const_span random);
 	bool handleUpdate(const MTPPhoneCall &call);
 	bool handleSignalingData(const MTPDupdatePhoneCallSignalingData &data);
@@ -342,6 +355,13 @@ private:
 		StartConferenceInfo extend);
 
 	const not_null<Delegate*> _delegate;
+	void setupNoveo(PeerData *peer, QString chatId, QString callId);
+	void receiveNoveoVideo(QImage image);
+	PeerData *_displayPeer = nullptr;
+	std::unique_ptr<Noveo::CallClient> _noveo;
+	std::unique_ptr<Noveo::CallMedia> _noveoMedia;
+	crl::time _noveoVideoSent = 0;
+	rpl::variable<int> _noveoParticipants = 0;
 	const not_null<UserData*> _user;
 	MTP::Sender _api;
 	Type _type = Type::Outgoing;

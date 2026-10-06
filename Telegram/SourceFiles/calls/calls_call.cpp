@@ -7,6 +7,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "calls/calls_call.h"
 
+#include "noveo/call_client.h"
+#include "noveo/call_media.h"
+#include "noveo/session_client.h"
+#include "main/main_account.h"
+#include <api/video/i420_buffer.h>
+#include <api/video/video_frame.h>
+#include <api/video/video_sink_interface.h>
+
 #include "apiwrap.h"
 #include "base/openssl_help.h"
 #include "base/platform/base_platform_info.h"
@@ -206,7 +214,10 @@ Call::Call(
 	not_null<Delegate*> delegate,
 	not_null<UserData*> user,
 	Type type,
-	bool video)
+	bool video,
+	PeerData *displayPeer,
+	QString chatId,
+	QString callId)
 : _delegate(delegate)
 , _user(user)
 , _api(&_user->session().mtp())
@@ -241,8 +252,129 @@ Call::Call(
 		_discardByTimeoutTimer.callOnce(config.callRingTimeoutMs);
 		startWaitingTrack();
 	}
+	if (_user->session().account().noveoApi()) {
+		setupNoveo(displayPeer, std::move(chatId), std::move(callId));
+		_discardByTimeoutTimer.cancel();
+		if (_type == Type::Incoming) setState(State::WaitingIncoming);
+	}
 	setupMediaDevices();
 	setupOutgoingVideo();
+}
+
+not_null<PeerData*> Call::displayPeer() const {
+	return _displayPeer ? _displayPeer : static_cast<PeerData*>(_user.get());
+}
+
+void Call::setupNoveo(PeerData *peer, QString chatId, QString callId) {
+	_displayPeer = peer;
+	const auto api = _user->session().account().noveoApi();
+	const auto target = displayPeer();
+	if (chatId.isEmpty()) chatId = api->voiceChatId(target->id);
+	_noveo = std::make_unique<Noveo::CallClient>(Noveo::CallClient::Config{
+		.chatId = chatId,
+		.callId = callId,
+		.selfId = api->selfId(),
+		.incoming = _type == Type::Incoming,
+		.group = !target->isUser(),
+		.send = [=](QJsonObject event) { return api->voiceAction(std::move(event)); },
+		.token = [=](QString chat, QString call, Noveo::CallClient::TokenDone done) {
+			api->voiceToken(std::move(chat), std::move(call), std::move(done));
+		},
+	});
+	_noveoMedia = std::make_unique<Noveo::CallMedia>();
+	_noveo->onState = [=](Noveo::CallClient::State state) {
+		using State = Noveo::CallClient::State;
+		if (state == State::Ended) {
+			// The native delegate destroys Call; never do that on a bridge callback stack.
+			crl::on_main(this, [=] { setState(Call::State::Ended); });
+		} else if (state == State::Active) {
+			setSignalBarCount(4);
+			if (_state.current() != Call::State::Established) setState(Call::State::Established);
+		} else if (state == State::Ringing) {
+			setState(Call::State::Ringing);
+			startWaitingTrack();
+		} else if (state == State::Connecting || state == State::Reconnecting) {
+			setSignalBarCount(0);
+			setState(Call::State::WaitingInit);
+		}
+	};
+	_noveo->onConnect = [=](QJsonObject token) { _noveoMedia->connectRoom(std::move(token), muted()); };
+	_noveo->onDisconnect = [=] { _noveoMedia->disconnectRoom(); };
+	_noveo->onError = [=](QString error) { _errors.fire({ ErrorType::Unknown, error }); };
+	_noveo->onMuted = [=](bool mute, QString error) {
+		_muted = mute;
+		if (!error.isEmpty()) _errors.fire({ ErrorType::NoMicrophone, error });
+	};
+	_noveo->onParticipants = [=](int count) { _noveoParticipants = count; };
+	_noveoMedia->onEvent = [=](QJsonObject event) {
+		const auto type = event.value("e").toString();
+		if (type == "screenError") {
+			_videoOutgoing->setState(Webrtc::VideoState::Inactive);
+			if (_videoCapture) _videoCapture->setState(tgcalls::VideoState::Inactive);
+			_errors.fire({ ErrorType::Unknown, event.value("message").toString() });
+		} else if (type == "deviceError") {
+			_errors.fire({ ErrorType::Unknown, event.value("message").toString() });
+		}
+		if (event.value("e").toString() == "remoteScreen" && !event.value("active").toBool()) {
+			_videoIncoming->setState(Webrtc::VideoState::Inactive);
+		}
+		_noveo->mediaEvent(event);
+	};
+	_noveoMedia->onVideoFrame = [=](QImage frame) { receiveNoveoVideo(std::move(frame)); };
+	_videoOutgoing->renderNextFrame() | rpl::on_next([=] {
+		if (_state.current() != Call::State::Established || crl::now() - _noveoVideoSent < 125) {
+			_videoOutgoing->markFrameShown();
+			return;
+		}
+		_noveoVideoSent = crl::now();
+		auto frame = _videoOutgoing->frame(Webrtc::FrameRequest::NonStrict()).copy();
+		_videoOutgoing->markFrameShown();
+		_noveoMedia->sendVideoFrame(std::move(frame), isSharingScreen());
+	}, _lifetime);
+	_videoOutgoing->stateChanges() | rpl::on_next([=](Webrtc::VideoState state) {
+		if (state == Webrtc::VideoState::Inactive) _noveoMedia->stopVideo();
+	}, _lifetime);
+	rpl::combine(_captureDeviceId.value(), _playbackDeviceId.value()) | rpl::on_next([=](
+			const Webrtc::DeviceResolvedId &input, const Webrtc::DeviceResolvedId &output) {
+		const auto name = [](const Webrtc::DeviceResolvedId &device) {
+			if (device.isDefault()) return QString();
+			for (const auto &candidate : Core::App().mediaDevices().devices(device.type)) {
+				if (candidate.id == device.value) return candidate.name;
+			}
+			return QString();
+		};
+		_noveoMedia->setDevices(name(input), name(output));
+	}, _lifetime);
+}
+
+void Call::startNoveo() {
+	if (_noveo) {
+		setState(State::WaitingInit);
+		_noveo->start();
+	}
+}
+void Call::handleNoveoEvent(const QJsonObject &event) { if (_noveo) _noveo->serverEvent(event); }
+
+void Call::receiveNoveoVideo(QImage image) {
+	if (image.isNull() || image.width() > 1280 || image.height() > 720) return;
+	image = image.convertToFormat(QImage::Format_RGB32);
+	const auto width = image.width(), height = image.height();
+	auto buffer = webrtc::I420Buffer::Create(width, height);
+	const auto clamp = [](int value) { return uint8(std::clamp(value, 0, 255)); };
+	for (auto y = 0; y < height; ++y) {
+		const auto row = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+		for (auto x = 0; x < width; ++x) {
+			const auto r = qRed(row[x]), g = qGreen(row[x]), b = qBlue(row[x]);
+			buffer->MutableDataY()[y * buffer->StrideY() + x] = clamp(((66*r + 129*g + 25*b + 128) >> 8) + 16);
+			if (!(x % 2) && !(y % 2)) {
+				buffer->MutableDataU()[(y/2) * buffer->StrideU() + x/2] = clamp(((-38*r - 74*g + 112*b + 128) >> 8) + 128);
+				buffer->MutableDataV()[(y/2) * buffer->StrideV() + x/2] = clamp(((112*r - 94*g - 18*b + 128) >> 8) + 128);
+			}
+		}
+	}
+	_videoIncoming->setState(Webrtc::VideoState::Active);
+	_videoIncoming->sink()->OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer)
+		.set_timestamp_us(crl::now() * 1000).set_rotation(webrtc::kVideoRotation_0).build());
 }
 
 Call::Call(
@@ -316,6 +448,7 @@ bool Call::isIncomingWaiting() const {
 }
 
 void Call::start(bytes::const_span random) {
+	if (_noveo) { startNoveo(); return; }
 	Expects(!conferenceInvite());
 
 	// Save config here, because it is possible that it changes between
@@ -420,7 +553,8 @@ void Call::applyUserConfirmation() {
 void Call::answer() {
 	const auto video = isSharingVideo();
 	_delegate->callRequestPermissionsOrFail(crl::guard(this, [=] {
-		actuallyAnswer();
+		if (_noveo) _noveo->answer();
+		else actuallyAnswer();
 	}), video);
 }
 
@@ -520,6 +654,7 @@ rpl::producer<Webrtc::DeviceResolvedId> Call::captureMuteDeviceId() {
 
 void Call::setMuted(bool mute) {
 	_muted = mute;
+	if (_noveoMedia) _noveoMedia->setMuted(mute);
 	if (_instance) {
 		_instance->setMuteMicrophone(mute);
 	}
@@ -690,6 +825,10 @@ void Call::showRatingBox() {
 }
 
 void Call::hangup(Data::GroupCall *migrateCall, const QString &migrateSlug) {
+	if (_noveo) {
+		_noveo->stop();
+		return;
+	}
 	if (_ratingInPanel) {
 		finishRating();
 		return;
@@ -1394,7 +1533,7 @@ void Call::setState(State state) {
 		}
 		switch (state) {
 		case State::Established:
-			_startTime = crl::now();
+			if (!_noveo || !_startTime) _startTime = crl::now();
 			break;
 		case State::ExchangingKeys:
 			_delegate->callPlaySound(Delegate::CallSound::Connecting);
@@ -1519,7 +1658,7 @@ void Call::toggleScreenSharing(
 		_systemAudioCapture->stop();
 		_systemAudioCapture = nullptr;
 	}
-	if (withAudio && Webrtc::SystemAudioCaptureSupported()) {
+	if (!_noveo && withAudio && Webrtc::SystemAudioCaptureSupported()) {
 		_systemAudioCapture = Webrtc::CreateSystemAudioCapture(
 			[weak = base::make_weak(this)](std::vector<uint8_t> &&samples) {
 				crl::on_main(
@@ -1695,6 +1834,8 @@ void Call::handleControllerError(const QString &error) {
 }
 
 void Call::destroyController() {
+	if (_noveoMedia) _noveoMedia->disconnectRoom();
+	if (_noveo && _videoCapture) _videoCapture->setState(tgcalls::VideoState::Inactive);
 	_instanceLifetime.destroy();
 	Core::App().mediaDevices().setCaptureMuteTracker(this, false);
 	if (_systemAudioCapture) {

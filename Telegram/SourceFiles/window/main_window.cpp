@@ -638,6 +638,15 @@ void MainWindow::activate() {
 	Platform::ActivateThisProcess();
 	raise();
 	activateWindow();
+#ifdef Q_OS_LINUX
+	// A tray window may not have been mapped yet when activateWindow ran.
+	// Qt's requestActivate consumes the daemon's XDG_ACTIVATION_TOKEN.
+	InvokeQueued(this, [=] {
+		if (isVisible() && !isActiveWindow()) {
+			if (const auto handle = windowHandle()) handle->requestActivate();
+		}
+	});
+#endif // Q_OS_LINUX
 	controller().updateIsActiveFocus();
 	if (wasHidden) {
 		if (const auto session = sessionController()) {

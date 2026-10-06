@@ -35,7 +35,7 @@ async def main():
                         str(ROOT / "Telegram/SourceFiles/noveo/auth_client.cpp"), str(ROOT / "Telegram/lib_tl/tl/tl_basic_types.cpp"), str(scheme) + ".cpp",
                         str(ROOT / "Telegram/SourceFiles/data/data_peer_id.cpp"), "-include", str(tmp / "scheme.h"),
                         "-Wl,--gc-sections", "-o", str(binary), *flags], check=True)
-        observed = {"reaction": [], "typing": [], "purchase": [], "claim": 0, "fave": 0, "sell": 0, "callback": 0}
+        observed = {"reaction": [], "typing": [], "purchase": [], "claim": 0, "fave": 0, "sell": 0, "callback": 0, "voice": [], "voice_token": 0}
         user = {"userId": "test-user", "username": "Self", "avatarUrl": "https://localhost/avatar.png"}
         other = {"userId": "other-user", "username": "Other"}
         gift = {"giftId": "gift-one", "giftNumber": 1, "name": "Fixture gift", "imageUrl": "https://localhost/gift.gif", "priceTenths": 1000}
@@ -55,6 +55,12 @@ async def main():
                  {"chatId": "channel", "chatType": "channel", "chatName": "Gifts!", "messages": [
                     {"messageId": "channel-gift", "senderId": "system", "timestamp": 1700000003,
                      "content": {"text": "[gift](https://web.noveo.ir/gift/gift-one)"}}]}]
+        chats.append({"chatId": "dm", "chatType": "private", "members": ["test-user", "other-user"], "messages": [
+            {"messageId": "completed-call", "senderId": "system", "timestamp": 1700000100,
+             "content": {"text": "Call", "callLog": {"callId": "completed", "status": "completed", "startedByUserId": "test-user", "durationSeconds": 42}}},
+            {"messageId": "missed-call", "senderId": "system", "timestamp": 1700000200,
+             "content": {"text": "Call", "callLog": {"callId": "missed", "status": "missed", "startedByUserId": "other-user", "durationSeconds": 0}}},
+        ]})
         sockets = []
         def authorize(request):
             assert request.headers["X-User-ID"] == "test-user" and request.headers["X-Auth-Token"] == "test-token"
@@ -107,6 +113,12 @@ async def main():
             assert await request.json() == {"chatId": "group", "messageId": "bot", "callbackData": "ack:session"}
             observed["callback"] += 1
             return web.json_response({"success": True, "message": "Confirmed"})
+        async def voice_token(request):
+            authorize(request)
+            assert await request.json() == {"chatId": "group", "callId": "fixture-call"}
+            observed["voice_token"] += 1
+            return web.json_response({"success": True, "serverUrl": "wss://voice.noveo.ir", "callId": "fixture-call",
+                "roomName": "fixture-room", "participantToken": "room-only-token", "participantIdentity": "test-user"})
         async def websocket(request):
             ws = web.WebSocketResponse()
             await ws.prepare(request)
@@ -119,6 +131,12 @@ async def main():
                 if kind == "resync_state":
                     await ws.send_json({"type": "user_list_update", "users": [user, other]})
                     await ws.send_json({"type": "chat_history", "chats": chats})
+                elif kind in ("voice_start", "voice_join", "voice_leave"):
+                    assert frame["chatId"] == "group" and frame["callId"] == "fixture-call"
+                    observed["voice"].append(kind)
+                    if kind == "voice_leave":
+                        await ws.send_json({"type": "voice_chat_update", "activeVoiceChats": {"group": {
+                            "callId": "fixture-call", "participants": ["test-user", "other-user"]}}})
                 elif kind in ("typing", "emoji_interaction", "emoji_interaction_seen"):
                     observed["typing"].append(kind)
                     assert frame["chatId"] == "group"
@@ -138,6 +156,7 @@ async def main():
                     raise AssertionError(frame)
             return ws
         app = web.Application()
+        app.router.add_post("/voice/token", voice_token)
         app.router.add_post("/gifts/sell", sell)
         app.router.add_post("/bot/callback", callback)
         app.router.add_get("/ws", websocket)
@@ -168,7 +187,8 @@ async def main():
         assert observed["typing"] == ["typing", "emoji_interaction", "emoji_interaction_seen"], observed
         assert observed["claim"] == observed["fave"] == 1 and len(observed["purchase"]) == 2, observed
         assert observed["sell"] == observed["callback"] == 1, observed
-        print("PASS authenticated SOCKS5 WebSocket/HTTP routing, Markdown UTF-16 entities, bot keyboards/callbacks, Stars header amount, gift sales, thumbnails, channel gift identity, native gift cards/profile paging, reactions and live effects, typing/tap batches, animation packs, favorites, mute/unmute, avatar gallery, gift HTTP failure/duplicate suppression/claim updates")
+        assert observed["voice_token"] == 1 and observed["voice"] == ["voice_start", "voice_join", "voice_leave"], observed
+        print("PASS voice token authentication, signaling, call history bubbles, authenticated SOCKS5 WebSocket/HTTP routing, Markdown UTF-16 entities, bot keyboards/callbacks, Stars header amount, gift sales, thumbnails, channel gift identity, native gift cards/profile paging, reactions and live effects, typing/tap batches, animation packs, favorites, mute/unmute, avatar gallery, gift HTTP failure/duplicate suppression/claim updates")
 
 if __name__ == "__main__":
     asyncio.run(main())

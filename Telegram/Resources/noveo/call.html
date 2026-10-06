@@ -1,0 +1,290 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    html, body { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
+    #remoteScreen { position: fixed; left: 0; top: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+</style>
+</head>
+<body>
+<script>/*LIVEKIT_SDK*/</script>
+<script>
+(function () {
+    var room = null;
+    var muted = false;
+    var deafened = false;
+    var audios = {};
+    var screenCanvas = null;
+    var screenCtx = null;
+    var screenTrack = null;
+    var screenPublishing = false;
+    var remoteScreenTrack = null;
+    var remoteScreenOwner = '';
+    var frameTimer = null;
+    var videoGeneration = 0;
+    var inputDevice = '';
+    var outputDevice = '';
+    var screenSource = '';
+
+    async function applyDevices() {
+        if (!room || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        var devices = await navigator.mediaDevices.enumerateDevices();
+        for (var selection of [['audioinput', inputDevice], ['audiooutput', outputDevice]]) {
+            var kind = selection[0], label = selection[1];
+            var device = !label ? { deviceId: 'default' } : devices.find(function (item) {
+                return item.kind === kind && item.label === label;
+            });
+            if (!device) continue;
+            try { await room.switchActiveDevice(kind, device.deviceId); }
+            catch (err) { post({ e: 'deviceError', message: String(err && err.message || err) }); }
+        }
+    }
+
+    function post(o) {
+        try { window.external.invoke(JSON.stringify(o)); } catch (e) {}
+    }
+
+    function ids() {
+        var out = [];
+        if (!room) return out;
+        room.remoteParticipants.forEach(function (p) { if (p && p.identity) out.push(String(p.identity)); });
+        return out;
+    }
+
+    // { id, muted } for every remote participant: a person is "muted" while they publish no live microphone track.
+    function states() {
+        var out = [];
+        if (!room) return out;
+        room.remoteParticipants.forEach(function (p) {
+            if (!p || !p.identity) return;
+            out.push({ id: String(p.identity), muted: !p.isMicrophoneEnabled });
+        });
+        return out;
+    }
+
+    function postParticipants() {
+        post({ e: 'participants', ids: ids(), states: states() });
+    }
+
+    function attach(track, sdk) {
+        if (!track || track.kind !== sdk.Track.Kind.Audio) return;
+        var el = track.attach();
+        el.autoplay = true;
+        el.muted = deafened;
+        document.body.appendChild(el);
+        audios[track.sid] = { track: track, el: el };
+    }
+
+    function detach(track) {
+        var a = audios[track.sid];
+        if (!a) return;
+        try { track.detach(a.el); } catch (e) {}
+        try { a.el.remove(); } catch (e) {}
+        delete audios[track.sid];
+    }
+
+    function showRemoteScreen(track, identity) {
+        hideRemoteScreen();
+        var el = track.attach();
+        el.id = 'remoteScreen';
+        el.autoplay = true;
+        el.muted = true;
+        el.playsInline = true;
+        document.body.appendChild(el);
+        remoteScreenTrack = track;
+        remoteScreenOwner = identity;
+        frameTimer = setInterval(function () {
+            if (!el.videoWidth || !el.videoHeight) return;
+            var canvas = document.createElement('canvas');
+            var scale = Math.min(1, 960 / el.videoWidth, 540 / el.videoHeight);
+            canvas.width = Math.max(1, Math.round(el.videoWidth * scale));
+            canvas.height = Math.max(1, Math.round(el.videoHeight * scale));
+            try {
+                canvas.getContext('2d').drawImage(el, 0, 0, canvas.width, canvas.height);
+                post({ e: 'videoFrame', data: canvas.toDataURL('image/jpeg', 0.7).split(',')[1] });
+            } catch (e) {}
+        }, 125);
+        post({ e: 'remoteScreen', active: true, id: identity });
+    }
+
+    function hideRemoteScreen() {
+        if (frameTimer) clearInterval(frameTimer);
+        frameTimer = null;
+        if (!remoteScreenTrack) return;
+        try { remoteScreenTrack.detach(); } catch (e) {}
+        var el = document.getElementById('remoteScreen');
+        if (el) el.remove();
+        var owner = remoteScreenOwner;
+        remoteScreenTrack = null;
+        remoteScreenOwner = '';
+        post({ e: 'remoteScreen', active: false, id: owner });
+    }
+
+    function isScreenShare(sdk, publication, track) {
+        var src = (publication && publication.source) || (track && track.source);
+        return src === sdk.Track.Source.ScreenShare || src === sdk.Track.Source.Camera;
+    }
+
+    window.NoveoCall = {
+        connect: async function (url, token, startMuted) {
+            var sdk = window.LivekitClient;
+            if (!sdk) { post({ e: 'error', message: 'LiveKit runtime is unavailable.' }); return; }
+            muted = !!startMuted;
+            try {
+                room = new sdk.Room({ adaptiveStream: false, dynacast: false });
+                var RE = sdk.RoomEvent;
+                room.on(RE.TrackSubscribed, function (track, publication, participant) {
+                    if (track.kind === sdk.Track.Kind.Video && isScreenShare(sdk, publication, track)) {
+                        showRemoteScreen(track, String(participant.identity));
+                    } else {
+                        attach(track, sdk);
+                    }
+                    postParticipants();
+                });
+                room.on(RE.TrackUnsubscribed, function (track, publication) {
+                    if (track.kind === sdk.Track.Kind.Video && isScreenShare(sdk, publication, track)) {
+                        if (remoteScreenTrack === track) hideRemoteScreen();
+                    } else {
+                        detach(track);
+                    }
+                    postParticipants();
+                });
+                room.on(RE.TrackMuted, postParticipants);
+                room.on(RE.TrackUnmuted, postParticipants);
+                room.on(RE.ParticipantConnected, postParticipants);
+                room.on(RE.ParticipantDisconnected, function () { postParticipants(); });
+                room.on(RE.ActiveSpeakersChanged, function (speakers) {
+                    post({ e: 'speakers', ids: (speakers || []).map(function (p) { return String(p.identity); }) });
+                });
+                room.on(RE.Reconnecting, function () { post({ e: 'reconnecting' }); });
+                room.on(RE.Reconnected, function () { post({ e: 'reconnected' }); });
+                room.on(RE.Disconnected, function () {
+                    Object.keys(audios).forEach(function (k) { try { audios[k].el.remove(); } catch (e) {} });
+                    audios = {};
+                    hideRemoteScreen();
+                    screenTrack = null;
+                    screenCanvas = null;
+                    room = null;
+                    post({ e: 'disconnected' });
+                });
+                await room.connect(url, token, { autoSubscribe: true });
+
+                var micError = '';
+                if (!muted) {
+                    try {
+                        await room.localParticipant.setMicrophoneEnabled(true, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+                    } catch (err) {
+                        muted = true;
+                        micError = String(err && err.message || err);
+                    }
+                }
+                room.remoteParticipants.forEach(function (p) {
+                    p.trackPublications.forEach(function (pub) {
+                        try { if (pub.setSubscribed) pub.setSubscribed(true); } catch (e) {}
+                        if (!pub.track) return;
+                        if (pub.track.kind === sdk.Track.Kind.Video && isScreenShare(sdk, pub, pub.track)) {
+                            showRemoteScreen(pub.track, String(p.identity));
+                        } else {
+                            attach(pub.track, sdk);
+                        }
+                    });
+                });
+                await applyDevices();
+                post({ e: 'connected', ids: ids(), states: states(), muted: muted, micError: micError });
+            } catch (err) {
+                post({ e: 'error', message: String(err && err.message || err) });
+            }
+        },
+        setMuted: async function (m) {
+            muted = !!m;
+            if (!room) return;
+            try {
+                await room.localParticipant.setMicrophoneEnabled(!muted, { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+                post({ e: 'muted', muted: muted });
+            } catch (err) {
+                muted = true;
+                post({ e: 'muted', muted: true, micError: String(err && err.message || err) });
+            }
+        },
+        setDeafened: function (d) {
+            deafened = !!d;
+            Object.keys(audios).forEach(function (k) { audios[k].el.muted = deafened; });
+        },
+        setDevices: async function (input, output) {
+            inputDevice = input === 'default' ? '' : input;
+            outputDevice = output === 'default' ? '' : output;
+            if (!room) return;
+            try {
+                await applyDevices();
+            } catch (err) { post({ e: 'deviceError', message: String(err && err.message || err) }); }
+        },
+        // Capture comes from the native desktop picker/camera, never browser display capture.
+        videoFrame: function (b64, w, h, screen) {
+            if (!room) return;
+            var source = screen ? 'screen_share' : 'camera';
+            if (screenSource && screenSource !== source) {
+                window.NoveoCall.stopScreen();
+                return;
+            }
+            screenSource = source;
+            var generation = videoGeneration;
+            var currentRoom = room;
+            var img = new Image();
+            img.onload = function () {
+                if (generation !== videoGeneration || room !== currentRoom) return;
+                if (!screenCanvas) {
+                    screenCanvas = document.createElement('canvas');
+                    screenCtx = screenCanvas.getContext('2d');
+                }
+                if (screenCanvas.width !== w || screenCanvas.height !== h) {
+                    screenCanvas.width = w;
+                    screenCanvas.height = h;
+                }
+                screenCtx.drawImage(img, 0, 0, w, h);
+                if (!screenTrack && !screenPublishing && room) {
+                    screenPublishing = true;
+                    var sdk = window.LivekitClient;
+                    var track = screenCanvas.captureStream(8).getVideoTracks()[0];
+                    room.localParticipant.publishTrack(track, { source: screen ? sdk.Track.Source.ScreenShare : sdk.Track.Source.Camera, name: screen ? 'screen' : 'camera' }).then(function () {
+                        if (generation !== videoGeneration || room !== currentRoom) {
+                            currentRoom.localParticipant.unpublishTrack(track).catch(function () {});
+                            track.stop();
+                            return;
+                        }
+                        screenTrack = track;
+                        screenPublishing = false;
+                        post({ e: 'screenPublished', screen: !!screen });
+                    }).catch(function (err) {
+                        track.stop();
+                        if (generation !== videoGeneration || room !== currentRoom) return;
+                        screenPublishing = false;
+                        post({ e: 'screenError', message: String(err && err.message || err) });
+                    });
+                }
+            };
+            img.src = 'data:image/jpeg;base64,' + b64;
+        },
+        stopScreen: async function () {
+            ++videoGeneration;
+            if (screenSource === 'screen_share') post({ e: 'screenStopped' });
+            screenSource = '';
+            var track = screenTrack;
+            screenTrack = null;
+            screenPublishing = false;
+            if (track && room) {
+                try { await room.localParticipant.unpublishTrack(track); } catch (e) {}
+                try { track.stop(); } catch (e) {}
+            }
+            screenCanvas = null;
+        },
+        disconnect: async function () {
+            await window.NoveoCall.stopScreen();
+            if (room) { try { await room.disconnect(); } catch (e) {} }
+        }
+    };
+    post({ e: 'ready' });
+})();
+</script>
+</body>
+</html>

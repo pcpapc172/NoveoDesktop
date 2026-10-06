@@ -6,6 +6,7 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "calls/calls_instance.h"
+#include "noveo/session_client.h"
 
 #include "calls/calls_call.h"
 #include "calls/group/calls_group_common.h"
@@ -200,6 +201,26 @@ Instance::~Instance() {
 	}
 }
 
+void Instance::handleNoveoEvent(not_null<Main::Session*> session, const QJsonObject &event) {
+	if (_currentCall && &_currentCall->user()->session() == session.get()) {
+		_currentCall->handleNoveoEvent(event);
+	}
+	if (event.value("type").toString() != "incoming_call" || _currentCall || _currentGroupCall) return;
+	const auto api = session->account().noveoApi();
+	const auto caller = event.value("callerId").toString();
+	const auto chat = event.value("chatId").toString();
+	const auto call = event.value("callId").toString();
+	if (!api || caller.isEmpty() || caller == api->selfId() || chat.isEmpty() || call.isEmpty()) return;
+	const auto id = api->voicePeer(chat, caller);
+	if (!id || !peerIsUser(id)) return; // Groups have a join action, never ring every member.
+	const auto user = session->data().user(Noveo::NativeUserId(caller));
+	createCall(user, Call::Type::Incoming, { .noveoChatId = chat, .noveoCallId = call });
+	const auto state = api->voiceState();
+	if (state.contains(chat)) _currentCall->handleNoveoEvent({
+		{ "type", "voice_chat_update" }, { "activeVoiceChats", state },
+	});
+}
+
 void Instance::startOutgoingCall(
 		not_null<UserData*> user,
 		StartOutgoingCallArgs args) {
@@ -229,6 +250,16 @@ void Instance::startOrJoinGroupCall(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		StartGroupCallArgs args) {
+	if (peer->session().account().noveoApi()) {
+		if (activateCurrentCall()) return;
+		if (const auto channel = peer->asChannel(); channel && !channel->isMegagroup()) return;
+		requestPermissionsOrFail(crl::guard(this, [=] {
+			if (!activateCurrentCall()) createCall(peer->session().user(), Call::Type::Outgoing, {
+				.isConfirmed = true, .noveoPeer = peer,
+			});
+		}), false);
+		return;
+	}
 	confirmLeaveCurrent(show, peer, args, [=](StartGroupCallArgs args) {
 		using JoinConfirm = Calls::StartGroupCallArgs::JoinConfirm;
 		const auto context = (args.confirm == JoinConfirm::Always)
@@ -436,7 +467,8 @@ void Instance::createCall(
 			bool isConfirmed,
 			const Performer &repeater) {
 		const auto delegate = _delegate.get();
-		auto call = std::make_unique<Call>(delegate, user, type, video);
+		auto call = std::make_unique<Call>(delegate, user, type, video,
+			args.noveoPeer, args.noveoChatId, args.noveoCallId);
 		if (isConfirmed) {
 			call->applyUserConfirmation();
 		}
@@ -464,6 +496,8 @@ void Instance::createCall(
 			) | rpl::on_next([=](bool video) {
 				repeater.callback(video, true, repeater);
 			}, raw->lifetime());
+		} else if (raw->isNoveo()) {
+			if (type == Call::Type::Outgoing) raw->startNoveo();
 		} else {
 			refreshServerConfig(&user->session());
 			refreshDhConfig();
