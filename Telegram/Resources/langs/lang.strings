@@ -434,6 +434,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_noveo_gift_sell_about" = "Display this gift on your profile or sell it for {amount} Stars.";
 "lng_noveo_gift_sell_confirm" = "Sell {name} for {amount} Stars?";
 "lng_noveo_gift_cost" = "{amount} Stars";
+"lng_noveo_gift_giveaway_title" = "Gift Giveaway";
+"lng_noveo_stars_giveaway" = "Stars Giveaway";
+"lng_noveo_gift_first_claim" = "First claim wins";
+"lng_noveo_gift_shared" = "You shared this gift";
+"lng_noveo_stars_shared" = "You shared these Stars";
 
 
 "lng_phone_title" = "Your Phone Number";

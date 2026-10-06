@@ -68,10 +68,12 @@ int main(int argc, char **argv) {
 				if (message.type() == mtpc_messageService && message.c_messageService().vaction().type() == mtpc_messageActionGiftStars) {
 					const auto &stars = message.c_messageService().vaction().c_messageActionGiftStars();
 					Assert(stars.vamount().v == 1000 && stars.vstars().v == 1000);
+					Assert(client.giftDetails(message.c_messageService().vid().v).value("mine").toBool());
 				} else if (message.type() == mtpc_messageService) {
 					giftId = message.c_messageService().vid().v;
 					Assert(message.c_messageService().vaction().type() == mtpc_messageActionStarGift);
 					Assert(client.giftDetails(giftId).value("giveawayId") == "giveaway");
+					Assert(!client.giftDetails(giftId).value("mine").toBool());
 				} else if (qs(message.c_message().vmessage()).startsWith("😀")) {
 					const auto &bot = message.c_message();
 					botId = bot.vid().v;

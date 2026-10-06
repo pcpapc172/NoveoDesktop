@@ -4132,6 +4132,11 @@ void Session::documentConvert(
 			documentApplyFields(i->second.get(), data);
 		}
 	}
+	if (data.type() == mtpc_document
+		&& data.c_document().vfile_reference().v.startsWith("noveo:")) {
+		original->status = FileReady;
+		original->uploadingData = nullptr;
+	}
 	documentApplyFields(original, data);
 	if (idChanged) {
 		cache().moveIfEmpty(oldCacheKey, original->cacheKey());

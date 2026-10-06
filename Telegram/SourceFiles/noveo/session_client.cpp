@@ -1307,7 +1307,8 @@ void SessionClient::message(const QJsonObject &frame) {
 		}
 		refreshDialog(peer);
 		if (_sends.contains(tempId)) {
-			if (native.type() == mtpc_messageService
+			if ((native.type() == mtpc_messageService
+				|| native.c_message().vmedia())
 				&& !_sendGroups.contains(_sends.value(tempId).requestId)) {
 				_sendGroups[_sends.value(tempId).requestId].remaining = 1;
 			}
@@ -1901,7 +1902,10 @@ QJsonObject SessionClient::giftDetails(int messageId) const {
 		for (auto i = giveaway.begin(); i != giveaway.end(); ++i) {
 			if (i.key() != "gift") result.insert(i.key(), i.value());
 		}
-		result.insert("mine", Text(giveaway.value("giverUserId")) == _self);
+		const auto giver = Text(giveaway.value("giverUserId"));
+		result.insert("mine", (giver.isEmpty()
+			? Text(object.value("senderId"))
+			: giver) == _self);
 	}
 	result.insert("kind", kind);
 	return result;
@@ -1912,6 +1916,28 @@ QJsonObject SessionClient::giftInfo(uint64 id) const {
 		if (NativeUserId("noveo-gift:" + Text(gift.value("giftId"))).bare == id) return gift;
 	}
 	return {};
+}
+
+void SessionClient::completeGiftClaim(const QString &giftId, PeerId peer) {
+	const auto messages = _messageObjects;
+	for (auto i = messages.begin(); i != messages.end(); ++i) {
+		const auto details = giftDetails(i.key());
+		if (Text(details.value("giveawayId")) != giftId
+			|| details.value("status") == "claimed") {
+			continue;
+		}
+		auto content = _messageContent.value(i.key());
+		const auto field = details.value("kind") == "stars"
+			? "starGiveaway" : "giftGiveaway";
+		auto giveaway = content.value(field).toObject();
+		if (giveaway.isEmpty()) giveaway = i.value().value(field).toObject();
+		giveaway.insert("status", "claimed");
+		content.insert(field, giveaway);
+		message({{"type", "message_updated"},
+			{"chatId", _chatIds.value(peer.value)},
+			{"messageId", _rawMessages.value(i.key())},
+			{"newContent", content}});
+	}
 }
 
 void SessionClient::giftAction(const QString &action, const QString &giftId, PeerId peer,
@@ -1940,6 +1966,7 @@ void SessionClient::giftAction(const QString &action, const QString &giftId, Pee
 		: action == "sell" ? "/gifts/sell" : "/gifts/purchase", body, [=, this](QJsonObject response) {
 			_giftActions.remove(key);
 			_fullProfiles.remove(NativeUserId(_self).bare);
+			if (claim) completeGiftClaim(giftId, peer);
 			done({});
 			gifts();
 			if (claim || action == "giveaway") _auth->send({{"type", "resync_state"}});

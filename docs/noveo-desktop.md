@@ -128,3 +128,12 @@ These require Python with aiohttp, OpenSSL, g++, pkg-config, the relevant Qt6 de
 7. Measure actual warm build times. The one-line Painter fix scheduled only a small incremental Linux build, but no fixed five-minute Windows guarantee has been measured.
 
 See [build and cache runbook](noveo-build-cache.md) for dispatch commands, registry formats and cache recovery.
+
+## 2026-10-06 upload completion and Android gift behavior
+
+- Media sends now acknowledge with native `updateMessageID` plus the complete new message, as albums already do. The previous shortened acknowledgement depended on `messageSentData`, which native media sends do not register; the item ID changed, but its media was not converted and its upload circle remained. Text sends retain their existing acknowledgement path.
+- Noveo document conversion also clears upload state when the URL-derived document ID is unchanged, matching the existing photo handling.
+- Giveaway cards match Android's Gift Giveaway / Stars Giveaway titles, gift name or Stars amount, First claim wins / You shared this gift / You shared these Stars / Already claimed states, and eligible-only Claim button. Claim runs directly without a gift purchase preview. Sender and claimed cards do not fall through to inherited Telegram gift dialogs.
+- A successful claim applies a native service-message edit immediately while preserving giveaway artwork and metadata; server sync still follows. The regression fixture deliberately omits the live server edit, proving the HTTP completion updates the card's backing message.
+- Gift details retain native animation and layout, show remaining/initial stock, offer Sell/Giveaway for owned profile gifts, and offer Buy for other gifts only when active stock is available. Removed the preview's inactive View button and sale wording on other people's gifts.
+- Verification: media and feature TLS fixtures passed; media regression asserts a full acknowledgement with the matching random ID, message ID, caption and document. Feature regression covers successful claim without a live update and sender ownership fallback. Actual language generation and a C++ probe using generated translation types passed. Full native application builds and visual/runtime checks were not run for this change.

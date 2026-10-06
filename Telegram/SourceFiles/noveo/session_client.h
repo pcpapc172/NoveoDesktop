@@ -81,6 +81,7 @@ private:
 	void fail(mtpRequestId id, const QString &reason);
 	void contacts();
 	void gifts();
+	void completeGiftClaim(const QString &giftId, PeerId peer);
 	void refreshDialog(PeerId peer);
 	void users(const QJsonArray &users, bool contacts = false);
 	void history(const QJsonArray &chats);

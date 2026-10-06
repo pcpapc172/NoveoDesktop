@@ -174,9 +174,13 @@ int main(int argc, char **argv) {
 			sendMedia(7, uploaded(500, "fixture.bin"));
 		} else if (id == 7) {
 			const auto result = Decode<MTPUpdates>(body);
-			Assert(result.type() == mtpc_updateShortSentMessage);
-			Assert(result.c_updateShortSentMessage().is_out());
-			Assert(result.c_updateShortSentMessage().vmedia()->type() == mtpc_messageMediaDocument);
+			const auto &updates = result.c_updates().vupdates().v;
+			Assert(updates.size() == 2);
+			Assert(updates.front().c_updateMessageID().vrandom_id().v == 7);
+			const auto &message = updates.back().c_updateNewMessage().vmessage().c_message();
+			Assert(message.is_out() && qs(message.vmessage()) == "uploaded");
+			Assert(message.vmedia()->type() == mtpc_messageMediaDocument);
+			Assert(message.vid().v == updates.front().c_updateMessageID().vid().v);
 			request(8,
 				MTPmessages_UploadMedia(
 					MTP_flags(MTPmessages_UploadMedia::Flags()), MTPstring(), peer, albumPhoto));

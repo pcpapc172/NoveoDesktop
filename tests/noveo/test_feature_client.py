@@ -46,7 +46,7 @@ async def main():
                     {"messageId": "gift", "senderId": "other-user", "timestamp": 1700000002, "content": {"giftGiveaway": giveaway}}]
         messages.extend([
             {"messageId": "stars", "senderId": "test-user", "timestamp": 1700000004,
-             "content": {"starGiveaway": {"giveawayId": "stars-giveaway", "giverUserId": "test-user", "amountTenths": 100000, "status": "claimed"}}},
+             "content": {"starGiveaway": {"giveawayId": "stars-giveaway", "amountTenths": 100000, "status": "claimed"}}},
             {"messageId": "bot", "senderId": "other-user", "timestamp": 1700000005,
              "content": {"text": "😀 **A new login** `inline`\n```cpp\n  code\n```\n**unclosed",
                          "inlineKeyboard": [[{"text": "It was me", "callbackData": "ack:session"}, {"text": "Open", "url": "https://noveo.ir"}]]}}])
@@ -95,8 +95,6 @@ async def main():
             assert await request.json() == {"giveawayId": "giveaway"}
             observed["claim"] += 1
             giveaway["status"] = "claimed"
-            for ws in sockets:
-                await ws.send_json({"type": "message_updated", "chatId": "group", "messageId": "gift", "newContent": {"giftGiveaway": giveaway}})
             return web.json_response({"success": True})
         async def sell(request):
             authorize(request)
