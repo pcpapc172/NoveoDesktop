@@ -8,6 +8,7 @@ import ssl
 import subprocess
 import tempfile
 from aiohttp import web
+from socks_fixture import SocksFixture
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -155,15 +156,19 @@ async def main():
         site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=context)
         await site.start()
         port = next(sock.getsockname()[1] for sock in site._server.sockets if len(sock.getsockname()) == 2)
-        process = await asyncio.create_subprocess_exec(str(binary), f"https://localhost:{port}", str(cert), env={**os.environ, "XDG_CONFIG_HOME": str(tmp / "config")})
+        socks = SocksFixture()
+        socks_port = await socks.start()
+        process = await asyncio.create_subprocess_exec(str(binary), f"https://localhost:{port}", str(cert), str(socks_port), env={**os.environ, "XDG_CONFIG_HOME": str(tmp / "config")})
         result = await process.wait()
+        await socks.close()
         await runner.cleanup()
+        assert len(socks.requests) > 5 and all(user == "proxy-user" for _, _, user in socks.requests), socks.requests
         assert result == 0, f"Native bridge probe exited {result}"
         assert observed["reaction"] == [False, True, False], observed
         assert observed["typing"] == ["typing", "emoji_interaction", "emoji_interaction_seen"], observed
         assert observed["claim"] == observed["fave"] == 1 and len(observed["purchase"]) == 2, observed
         assert observed["sell"] == observed["callback"] == 1, observed
-        print("PASS Markdown UTF-16 entities, bot keyboards/callbacks, Stars header amount, gift sales, thumbnails, channel gift identity, native gift cards/profile paging, reactions and live effects, typing/tap batches, animation packs, favorites, mute/unmute, avatar gallery, gift HTTP failure/duplicate suppression/claim updates")
+        print("PASS authenticated SOCKS5 WebSocket/HTTP routing, Markdown UTF-16 entities, bot keyboards/callbacks, Stars header amount, gift sales, thumbnails, channel gift identity, native gift cards/profile paging, reactions and live effects, typing/tap batches, animation packs, favorites, mute/unmute, avatar gallery, gift HTTP failure/duplicate suppression/claim updates")
 
 if __name__ == "__main__":
     asyncio.run(main())

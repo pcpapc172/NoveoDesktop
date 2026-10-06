@@ -8,9 +8,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include <QtCore/QJsonObject>
+#include <QtCore/QElapsedTimer>
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtNetwork/QSslSocket>
+#include <QtNetwork/QNetworkProxy>
 #include <functional>
 
 namespace Noveo {
@@ -32,6 +34,9 @@ public:
 	~AuthClient();
 	void login(QString username, QString password);
 	void restore(const QJsonObject &authorization, bool connectNow = true);
+	void setProxy(const QNetworkProxy &proxy);
+	void networkAvailable(bool available);
+	void checkProxy(const QNetworkProxy &proxy);
 	void cancel();
 	void clear();
 	bool send(const QJsonObject &message);
@@ -40,6 +45,7 @@ public:
 
 	std::function<void(const QJsonObject&)> onAuthenticated;
 	std::function<void(Error)> onError;
+	std::function<void(int)> onProxyChecked;
 	std::function<void(bool)> onConnectionChanged;
 	std::function<void(QString)> onDiagnostic;
 	std::function<void(const QJsonObject&)> onMessage;
@@ -54,6 +60,7 @@ private:
 	void failed(Error error, bool terminal = false);
 
 	QUrl _endpoint;
+	QElapsedTimer _probeStarted;
 	QSslSocket _socket;
 	QTimer _timeout;
 	QTimer _reconnect;
@@ -63,6 +70,8 @@ private:
 	QByteArray _fragment;
 	QJsonObject _pending;
 	QJsonObject _authorization;
+	bool _probing = false;
+	bool _networkAvailable = true;
 	bool _upgraded = false;
 	bool _authenticated = false;
 	bool _active = false;

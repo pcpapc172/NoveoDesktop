@@ -86,19 +86,61 @@ void AuthClient::restore(const QJsonObject &authorization, bool connectNow) {
 }
 
 void AuthClient::open() {
+	const auto probing = _probing;
 	cancel();
+	_probing = probing;
 	if (_endpoint.scheme() != "wss" || _endpoint.host().isEmpty()) {
 		failed(Error::Protocol, true);
 		return;
 	}
+	if (!_networkAvailable) {
+		failed(Error::Connection);
+		return;
+	}
 	_active = true;
-	_timeout.start(kTimeout);
+	_timeout.start(_probing ? 10000 : kTimeout);
 	_socket.setPeerVerifyMode(QSslSocket::VerifyPeer);
 	_socket.connectToHostEncrypted(_endpoint.host(), quint16(_endpoint.port(443)));
 }
 
+void AuthClient::setProxy(const QNetworkProxy &proxy) {
+	if (_socket.proxy() == proxy) return;
+	const auto reconnect = _active || _reconnect.isActive();
+	if (reconnect && !_authorization.isEmpty()) {
+		failed(Error::Connection);
+		_socket.setProxy(proxy);
+		open();
+	} else if (reconnect && !_pending.isEmpty()) {
+		cancel();
+		_socket.setProxy(proxy);
+		open();
+	} else {
+		if (reconnect) failed(Error::Connection);
+		_socket.setProxy(proxy);
+	}
+}
+
+void AuthClient::networkAvailable(bool available) {
+	if (_networkAvailable == available) return;
+	_networkAvailable = available;
+	if (!available && _active) {
+		failed(Error::Connection);
+	} else if (available && !_authenticated && !_authorization.isEmpty()) {
+		open();
+	}
+}
+
+void AuthClient::checkProxy(const QNetworkProxy &proxy) {
+	clear();
+	_socket.setProxy(proxy);
+	_probing = true;
+	_probeStarted.start();
+	open();
+}
+
 void AuthClient::cancel() {
 	_active = false;
+	_probing = false;
 	_authenticated = false;
 	_upgraded = false;
 	_timeout.stop();
@@ -169,6 +211,10 @@ bool AuthClient::upgrade() {
 	}
 	_incoming.remove(0, end + 4);
 	_upgraded = true;
+	if (_probing) {
+		writeFrame(9, QByteArray("noveo"));
+		return true;
+	}
 	auto payload = _pending;
 	_pending = {}; // Do not retain passwords after sending the first frame.
 	if (payload.isEmpty()) {
@@ -216,6 +262,12 @@ bool AuthClient::frames() {
 		} else if (opcode == 9) {
 			writeFrame(10, payload);
 		} else if (opcode == 10) {
+			if (_probing && payload == "noveo") {
+				const auto elapsed = int(qMax(qint64(1), _probeStarted.elapsed()));
+				cancel();
+				if (onProxyChecked) onProxyChecked(elapsed);
+				return true;
+			}
 			if (_authenticated && payload == "noveo") _timeout.stop();
 			continue;
 		} else if (opcode == 1 || opcode == 0) {
@@ -254,6 +306,10 @@ void AuthClient::writeFrame(quint8 opcode, const QByteArray &payload) {
 void AuthClient::message(const QByteArray &payload) {
 	const auto document = QJsonDocument::fromJson(payload);
 	if (!document.isObject()) { failed(Error::Protocol, true); return; }
+	if (_probing) {
+		failed(Error::Protocol, true);
+		return;
+	}
 	const auto object = document.object();
 	const auto type = object.value("type").toString();
 	if (type == "login_success") {
@@ -284,6 +340,11 @@ void AuthClient::failed(Error error, bool terminal) {
 	if (onDiagnostic) {
 		onDiagnostic(QStringLiteral("Connection failure: error=%1, upgraded=%2, socket=%3, detail=%4")
 			.arg(int(error)).arg(_upgraded).arg(int(_socket.error())).arg(_socket.errorString()));
+	}
+	if (_probing) {
+		cancel();
+		if (onProxyChecked) onProxyChecked(-1);
+		return;
 	}
 	const auto reconnect = !terminal && !_authorization.isEmpty();
 	cancel();

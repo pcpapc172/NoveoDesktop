@@ -448,15 +448,13 @@ auto ConnectionState::computeLayout(const State &state) const -> Layout {
 	result.progressShown = (state.type != State::Type::Connected);
 	result.visible = _account->sessionExists()
 		&& state.exposed
-		&& !state.updateReady
+		&& (!state.updateReady || state.type != State::Type::Connected)
 		&& (state.useProxy
 			|| state.type == State::Type::Connecting
 			|| state.type == State::Type::Waiting);
 	switch (state.type) {
 	case State::Type::Connecting:
-		result.text = state.underCursor
-			? tr::lng_connecting(tr::now)
-			: QString();
+		result.text = tr::lng_connecting(tr::now);
 		break;
 
 	case State::Type::Waiting:

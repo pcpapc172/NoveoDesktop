@@ -2614,7 +2614,7 @@ bool ShowNoveoGiftBox(
 		if (!info.value("giftId").toString().isEmpty() && !owned && buyable) {
 			box->addButton(tr::lng_noveo_gift_buy(), [=] { confirm(false, peer); });
 		}
-		if (!info.value("giftId").toString().isEmpty() && owned) {
+		if (!info.value("giftId").toString().isEmpty()) {
 			box->addButton(tr::lng_noveo_gift_giveaway(), [=] {
 				const auto window = weak.get();
 				if (!window) return;

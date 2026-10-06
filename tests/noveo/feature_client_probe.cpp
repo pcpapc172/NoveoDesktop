@@ -32,6 +32,11 @@ int main(int argc, char **argv) {
 	ws.setScheme("wss");
 	Noveo::AuthClient auth(ws);
 	Noveo::SessionClient client(&auth, endpoint);
+	if (app.arguments().size() > 3) {
+		const auto proxy = QNetworkProxy(QNetworkProxy::Socks5Proxy, "127.0.0.1", app.arguments().at(3).toUShort(), "proxy-user", "proxy-password");
+		auth.setProxy(proxy);
+		client.setProxy(proxy);
+	}
 	const auto peer = MTPInputPeer(MTP_inputPeerChat(MTP_long(Noveo::NativeUserId("group").bare)));
 	const auto notifyPeer = MTPInputNotifyPeer(MTP_inputNotifyPeer(peer));
 	std::set<int> checks;

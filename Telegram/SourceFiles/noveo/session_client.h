@@ -31,6 +31,7 @@ public:
 	void authenticated(const QJsonObject &profile);
 	[[nodiscard]] MTPUser selfUser() const;
 	void disconnected();
+	void setProxy(const QNetworkProxy &proxy);
 	void message(const QJsonObject &message);
 	void request(mtpRequestId id, const mtpBuffer &body);
 	void cancel(mtpRequestId id);

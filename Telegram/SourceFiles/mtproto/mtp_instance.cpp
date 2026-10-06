@@ -2011,6 +2011,10 @@ void Instance::Private::setNoveoConnected(bool connected) {
 	}
 }
 
+bool Instance::isNoveo() const {
+	return _private->isNoveo();
+}
+
 void Instance::setNoveoConnected(bool connected) {
 	_private->setNoveoConnected(connected);
 }

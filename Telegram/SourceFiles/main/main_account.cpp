@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 
 #include "base/platform/base_platform_info.h"
+#include "base/network_reachability.h"
 #include "core/application.h"
 #include "storage/storage_account.h"
 #include "storage/storage_domain.h" // Storage::StartResult.
@@ -565,6 +566,24 @@ void Account::prepareNoveoClient() {
 		local().writeMtpData(); // Existing encrypted account storage.
 		Local::sync();
 	};
+	Core::App().settings().proxy().connectionTypeValue(
+	) | rpl::on_next([this] {
+		const auto &settings = Core::App().settings().proxy();
+		const auto selected = settings.selected();
+		const auto proxy = settings.isEnabled()
+			&& (selected.type == MTP::ProxyData::Type::Socks5
+				|| selected.type == MTP::ProxyData::Type::Http)
+			? MTP::ToNetworkProxy(selected)
+			: QNetworkProxy(settings.isSystem()
+				? QNetworkProxy::DefaultProxy : QNetworkProxy::NoProxy);
+		_noveoApi->setProxy(proxy);
+		_noveo->setProxy(proxy);
+	}, _lifetime);
+	const auto reachability = base::NetworkReachability::Instance();
+	reachability->availableValue(
+	) | rpl::on_next([this, reachability](bool available) {
+		_noveo->networkAvailable(available);
+	}, _lifetime);
 }
 
 void Account::loginNoveo(QString username, QString password, Fn<void(QString)> fail) {

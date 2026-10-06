@@ -5,7 +5,8 @@ from pathlib import Path
 import ssl
 import subprocess
 import tempfile
-from aiohttp import web
+from aiohttp import web, WSMsgType
+from socks_fixture import SocksFixture
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,8 +26,18 @@ async def main():
             if request.headers.get("Origin") != "https://noveo.ir":
                 return web.Response(status=403, text="Origin not allowed")
             assert request.headers.get("User-Agent") == "NoveoDesktop/0.1"
-            ws = web.WebSocketResponse(autoping=request.match_info["scenario"] != "heartbeat")
+            ws = web.WebSocketResponse(autoping=request.match_info["scenario"] not in ("heartbeat", "probe", "probe_error"))
             await ws.prepare(request)
+            if request.match_info["scenario"].startswith("probe"):
+                ping = await ws.receive()
+                assert ping.type == WSMsgType.PING and ping.data == b"noveo"
+                if request.match_info["scenario"] == "probe_error":
+                    await ws.close()
+                else:
+                    await ws.pong(ping.data)
+                async for _ in ws:
+                    pass
+                return ws
             auth = await ws.receive_json()
             seen.append(auth)
             assert auth["clientInfo"]["clientName"] == "NoveoDesktop"
@@ -68,14 +79,19 @@ async def main():
         site = web.TCPSite(runner, "127.0.0.1", 0, ssl_context=context)
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
+        socks = SocksFixture()
+        socks_port = await socks.start()
         try:
-            for scenario in ("success", "invalid", "rate", "malformed", "fragment", "restore", "reconnect", "revoked", "untrusted", "heartbeat"):
-                proc = await asyncio.create_subprocess_exec(str(binary), f"wss://localhost:{port}/{scenario}", scenario, str(cert))
+            for scenario in ("success", "invalid", "rate", "malformed", "fragment", "restore", "reconnect", "revoked", "untrusted", "heartbeat", "offline", "proxy", "proxy_switch", "proxy_disable", "probe", "probe_error"):
+                proc = await asyncio.create_subprocess_exec(str(binary), f"wss://localhost:{port}/{scenario}", scenario, str(cert), str(socks_port))
                 code = await proc.wait()
                 assert code == 0, (scenario, code)
                 print(f"PASS {scenario}", flush=True)
             assert any(msg["type"] == "reconnect" for msg in seen)
+            assert any(user == "proxy-user" for _, _, user in socks.requests), socks.requests
+            assert any(user == "" for _, _, user in socks.requests), socks.requests
         finally:
+            await socks.close()
             await runner.cleanup()
 
 asyncio.run(main())

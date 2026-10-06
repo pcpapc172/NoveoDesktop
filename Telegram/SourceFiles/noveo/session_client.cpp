@@ -503,6 +503,10 @@ MTPUser SessionClient::selfUser() const {
 	return _users.value(NativeUserId(_self).bare);
 }
 
+void SessionClient::setProxy(const QNetworkProxy &proxy) {
+	_http.setProxy(proxy);
+}
+
 void SessionClient::disconnected() {
 	_historyReady = false;
 	_historyRequests.clear();

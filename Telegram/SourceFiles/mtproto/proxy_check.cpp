@@ -8,11 +8,51 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/proxy_check.h"
 
 #include "mtproto/facade.h"
+#include "noveo/auth_client.h"
 #include "mtproto/mtproto_dc_options.h"
 
 namespace MTP {
 
 using Connection = details::AbstractConnection;
+
+namespace {
+
+class NoveoProxyConnection final : public Connection {
+public:
+	explicit NoveoProxyConnection(const ProxyData &proxy)
+	: Connection(QThread::currentThread(), proxy)
+	, _client(QUrl("wss://noveo.ir:8443/ws")) {
+		_client.onProxyChecked = [this](int ping) {
+			_pingTime = ping;
+			if (ping > 0) {
+				emit connected();
+			} else {
+				emit error(kErrorCodeOther);
+			}
+		};
+	}
+
+	details::ConnectionPointer clone(const ProxyData &proxy) override {
+		return details::ConnectionPointer::New<NoveoProxyConnection>(proxy);
+	}
+	crl::time pingTime() const override { return _pingTime; }
+	crl::time fullConnectTimeout() const override { return 10000; }
+	void sendData(mtpBuffer &&) override { }
+	void disconnectFromServer() override { _client.cancel(); }
+	void connectToServer(const QString &, int, const bytes::vector &, int16, bool) override {
+		_client.checkProxy(ToNetworkProxy(_proxy));
+	}
+	bool isConnected() const override { return _pingTime > 0; }
+	int32 debugState() const override { return isConnected() ? 1 : 0; }
+	QString transport() const override { return u"WebSocket"_q; }
+	QString tag() const override { return u"NoveoProxyCheck"_q; }
+
+private:
+	Noveo::AuthClient _client;
+};
+
+} // namespace
+
 
 void ResetProxyCheckers(
 		ProxyCheckConnection &v4,
@@ -49,6 +89,22 @@ void StartProxyCheck(
 	using Variants = DcOptions::Variants;
 
 	ResetProxyCheckers(v4, v6);
+	if (mtproto->isNoveo()) {
+		if (proxy.type != ProxyData::Type::Socks5
+			&& proxy.type != ProxyData::Type::Http) {
+			return;
+		}
+		v4 = details::ConnectionPointer::New<NoveoProxyConnection>(proxy);
+		const auto raw = v4.get();
+		raw->connect(raw, &Connection::connected, [=] {
+			if (done) done(raw, int(raw->pingTime()));
+		});
+		raw->connect(raw, &Connection::error, [=] {
+			if (fail) fail(raw);
+		});
+		v4->connectToServer({}, 0, {}, 0, false);
+		return;
+	}
 	if (proxy.type == ProxyData::Type::Web) {
 		return;
 	}

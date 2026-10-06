@@ -95,6 +95,7 @@ public:
 	int32 dcstate(ShiftedDcId shiftedDcId = 0);
 	QString dctransport(ShiftedDcId shiftedDcId = 0);
 	void ping();
+	[[nodiscard]] bool isNoveo() const;
 	void setNoveoConnected(bool connected);
 	void setNoveoRequestHandler(
 		Fn<void(mtpRequestId, const mtpBuffer&)> handler,
