@@ -25,6 +25,7 @@ PhoneWidget::PhoneWidget(
 , _totp(this, st::introName, tr::lng_noveo_totp_code())
 , _username(this, st::introName, tr::lng_noveo_login_username())
 , _password(this, st::introPassword, tr::lng_noveo_login_password()) {
+	_password->setClearButtonEnabled(false);
 	_totp->hide();
 	_totp->submits() | rpl::on_next([this] { submit(); }, lifetime());
 	setTitleText(tr::lng_noveo_login_title());
