@@ -32,6 +32,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_upload.h"
 #include "storage/storage_shared_media.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "main/main_session_settings.h"
 #include "menu/menu_ttl_validator.h"
@@ -3241,6 +3242,7 @@ bool HistoryItem::allowsForward() const {
 }
 
 bool HistoryItem::isTooOldForEdit(TimeId now) const {
+	if (_history->session().account().noveoApi()) return false;
 	return !_history->peer->canEditMessagesIndefinitely()
 		&& !isScheduled()
 		&& !isWelcomeTemplate()
@@ -3346,6 +3348,7 @@ bool HistoryItem::canDelete() const {
 	if (isWelcomeTemplate()) {
 		return CanEditPeerInfo(_history->peer);
 	}
+	if (_history->session().account().noveoApi() && _history->peer->isChat()) return out();
 	auto channel = _history->peer->asChannel();
 	if (!channel) {
 		return !isGroupMigrate();
@@ -3363,6 +3366,10 @@ bool HistoryItem::canDelete() const {
 }
 
 bool HistoryItem::canDeleteForEveryone(TimeId now) const {
+	if (_history->session().account().noveoApi()) {
+		const auto peer = _history->peer;
+		return isRegular() && !peer->isSelf() && !peer->isChannel() && (peer->isUser() || out());
+	}
 	const auto peer = _history->peer;
 	const auto &config = _history->session().serverConfig();
 	const auto messageToMyself = peer->isSelf();

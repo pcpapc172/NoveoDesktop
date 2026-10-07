@@ -545,6 +545,9 @@ void Account::prepareNoveoClient() {
 		if (_mtp) _mtp->setNoveoConnected(connected);
 		if (!connected) _noveoApi->disconnected();
 	};
+	_noveo->onTotpRequired = [this] {
+		if (_noveoTotpRequired) _noveoTotpRequired();
+	};
 	_noveo->onError = [this](Noveo::AuthClient::Error error) {
 		using Error = Noveo::AuthClient::Error;
 		const auto text = (error == Error::Credentials)
@@ -558,8 +561,13 @@ void Account::prepareNoveoClient() {
 			crl::on_main(this, [this] { logOut(); });
 		}
 	};
+	_noveo->onAuthorizationChanged = [this] {
+		local().writeMtpData();
+		Local::sync();
+	};
 	_noveo->onAuthenticated = [this](const QJsonObject &profile) {
 		_noveoLoginFail = nullptr;
+		_noveoTotpRequired = nullptr;
 		_noveoApi->authenticated(profile);
 		const auto user = _noveoApi->selfUser();
 		if (const auto session = maybeSession()) {
@@ -590,13 +598,26 @@ void Account::prepareNoveoClient() {
 	}, _lifetime);
 }
 
-void Account::loginNoveo(QString username, QString password, Fn<void(QString)> fail) {
+void Account::loginNoveo(QString username, QString password, Fn<void(QString)> fail, Fn<void()> totpRequired) {
 	prepareNoveoClient();
 	_noveoLoginFail = std::move(fail);
+	_noveoTotpRequired = std::move(totpRequired);
 	_noveo->login(std::move(username), std::move(password));
 }
 
+bool Account::noveoAwaitingTotp() const {
+	return _noveo && _noveo->awaitingTotp();
+}
+
+void Account::submitNoveoTotp(QString code, Fn<void(QString)> fail) {
+	_noveoLoginFail = std::move(fail);
+	if (!_noveo || !_noveo->submitTotp(std::move(code))) {
+		if (const auto callback = base::take(_noveoLoginFail)) callback(tr::lng_noveo_totp_invalid(tr::now));
+	}
+}
+
 void Account::cancelNoveoLogin() {
+	_noveoTotpRequired = nullptr;
 	_noveoLoginFail = nullptr;
 	if (_noveo && !sessionExists()) _noveo->clear();
 }

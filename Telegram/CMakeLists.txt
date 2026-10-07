@@ -1418,6 +1418,8 @@ PRIVATE
     noveo/auth_client.cpp
     noveo/auth_client.h
     noveo/session_client.cpp
+    noveo/session_actions.cpp
+    noveo/request_fields.h
     noveo/session_client.h
     intro/intro_phone.cpp
     intro/intro_phone.h
@@ -1637,8 +1639,6 @@ PRIVATE
     mtproto/core_types.h
     mtproto/dedicated_file_loader.cpp
     mtproto/dedicated_file_loader.h
-    mtproto/details/mtproto_web_proxy_socket.cpp
-    mtproto/details/mtproto_web_proxy_socket.h
     mtproto/facade.cpp
     mtproto/facade.h
     mtproto/mtp_instance.cpp
@@ -1650,15 +1650,7 @@ PRIVATE
     mtproto/session.h
     mtproto/session_private.cpp
     mtproto/session_private.h
-    mtproto/special_config_request.cpp
-    mtproto/special_config_request.h
     mtproto/type_utils.h
-    mtproto/web_proxy/web_proxy_frame.cpp
-    mtproto/web_proxy/web_proxy_frame.h
-    mtproto/web_proxy/web_proxy_transport.cpp
-    mtproto/web_proxy/web_proxy_transport.h
-    mtproto/web_proxy/web_proxy_webview.cpp
-    mtproto/web_proxy/web_proxy_webview.h
     overview/overview_checkbox.cpp
     overview/overview_checkbox.h
     overview/overview_layout.cpp

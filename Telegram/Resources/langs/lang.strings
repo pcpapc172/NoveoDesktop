@@ -8810,3 +8810,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_folder_archive_status" = "ZIP archive";
 
 // Keys finished
+
+"lng_noveo_totp_code" = "Authenticator code";
+"lng_noveo_totp_description" = "Enter the six-digit code from your authenticator app.";
+"lng_noveo_totp_invalid" = "Enter a valid six-digit authenticator code.";
+
+"lng_noveo_change_password" = "Change password";
+"lng_noveo_current_password" = "Current password";
+"lng_noveo_new_password" = "New password";
+"lng_noveo_group_invites" = "Group invitations";
+"lng_noveo_block_group_invites" = "Block group invitations";
+
+"lng_noveo_member_permissions" = "Member permissions";
+"lng_noveo_permission_messages" = "Send messages";
+"lng_noveo_permission_files" = "Send files";
+"lng_noveo_permission_members" = "Add members";
+"lng_noveo_permission_defaults" = "Use group defaults";
+
+"lng_noveo_chat_permissions" = "Chat permissions";
+"lng_noveo_permission_view_members" = "View members";

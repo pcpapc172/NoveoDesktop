@@ -159,6 +159,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "menu/menu_send.h"
 #include "menu/menu_timecode_action.h"
 #include "mtproto/mtproto_config.h"
+#include "noveo/session_client.h"
 #include "lang/lang_keys.h"
 #include "settings/business/settings_quick_replies.h"
 #include "settings/settings_credits_graphics.h"
@@ -183,6 +184,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/elastic_scroll.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/item_text_options.h"
+#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
@@ -1244,6 +1246,8 @@ void HistoryWidget::refreshJoinChannelText() {
 			: (channel->requestToJoin() && !channel->amCreator())
 			? tr::lng_profile_apply_to_join_group(tr::now)
 			: tr::lng_profile_join_group(tr::now)).toUpper());
+	} else if (_peer && _peer->isChat() && session().account().noveoApi()) {
+		_joinChannel->setText(tr::lng_profile_join_group(tr::now).toUpper());
 	}
 }
 
@@ -6013,11 +6017,18 @@ void HistoryWidget::sendBotStartCommand() {
 }
 
 void HistoryWidget::joinChannel() {
-	if (!_peer || !_peer->isChannel() || !isJoinChannel()) {
+	if (!_peer || !isJoinChannel()) {
 		updateControlsVisibility();
 		return;
 	}
-	session().api().joinChannel(_peer->asChannel());
+	if (const auto api = session().account().noveoApi(); api && _peer->isChat()) {
+		api->joinChat(_peer->id, crl::guard(this, [=](QString error) {
+			if (!error.isEmpty()) controller()->showToast(error);
+			updateControlsVisibility();
+		}));
+	} else if (const auto channel = _peer->asChannel()) {
+		session().api().joinChannel(channel);
+	}
 }
 
 void HistoryWidget::toggleMuteUnmute() {
@@ -6678,6 +6689,9 @@ bool HistoryWidget::isBlocked() const {
 }
 
 bool HistoryWidget::isJoinChannel() const {
+	if (_peer && _peer->isChat()) {
+		if (const auto api = session().account().noveoApi()) return api->needsJoin(_peer->id);
+	}
 	if (const auto channel = _peer ? _peer->asChannel() : nullptr) {
 		return !channel->amIn() && !channel->isMonoforum();
 	}

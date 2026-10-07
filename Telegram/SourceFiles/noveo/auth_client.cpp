@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "noveo/auth_client.h"
 
+#include <algorithm>
+
 #include <QtCore/QCryptographicHash>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QRandomGenerator>
@@ -74,6 +76,15 @@ void AuthClient::login(QString username, QString password) {
 	open();
 }
 
+bool AuthClient::submitTotp(QString code) {
+	code = code.trimmed();
+	if (!_awaitingTotp || !_upgraded || code.size() != 6
+		|| std::any_of(code.cbegin(), code.cend(), [](QChar c) { return c < '0' || c > '9'; })) return false;
+	_timeout.start(kTimeout);
+	writeFrame(1, QJsonDocument(QJsonObject{{"type", "login_totp_verify"}, {"code", code}}).toJson(QJsonDocument::Compact));
+	return true;
+}
+
 void AuthClient::restore(const QJsonObject &authorization, bool connectNow) {
 	clear();
 	_authorization = authorization;
@@ -139,6 +150,7 @@ void AuthClient::checkProxy(const QNetworkProxy &proxy) {
 }
 
 void AuthClient::cancel() {
+	_awaitingTotp = false;
 	_active = false;
 	_probing = false;
 	_authenticated = false;
@@ -320,6 +332,7 @@ void AuthClient::message(const QByteArray &payload) {
 			failed(Error::Protocol, true); return;
 		}
 		_authorization = { { "user", user }, { "token", token } };
+		_awaitingTotp = false;
 		_authenticated = true;
 		_timeout.stop();
 		_heartbeat.start();
@@ -328,12 +341,26 @@ void AuthClient::message(const QByteArray &payload) {
 	} else if (type == "error" && !_authenticated) {
 		failed(_authorization.isEmpty() ? Error::Credentials : Error::SessionExpired, true);
 	} else if (type == "login_totp_required") {
-		failed(Error::TwoFactorRequired, true);
+		_awaitingTotp = true;
+		_timeout.stop();
+		if (onTotpRequired) onTotpRequired();
+		else failed(Error::TwoFactorRequired, true);
+	} else if (type == "login_totp_error" && _awaitingTotp) {
+		_timeout.stop();
+		if (onError) onError(Error::Credentials);
 	} else if (type == "session_revoked") {
 		failed(Error::SessionExpired, true);
 	} else if (_authenticated && onMessage) {
 		onMessage(object);
 	}
+}
+
+bool AuthClient::replaceToken(QString token, QString sessionId) {
+	if (!_authenticated || token.isEmpty() || sessionId.isEmpty()) return false;
+	_authorization.insert("token", std::move(token));
+	_authorization.insert("sessionId", std::move(sessionId));
+	if (onAuthorizationChanged) onAuthorizationChanged();
+	return true;
 }
 
 void AuthClient::failed(Error error, bool terminal) {

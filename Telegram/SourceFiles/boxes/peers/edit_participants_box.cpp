@@ -17,6 +17,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/max_invite_box.h"
 #include "boxes/add_contact_box.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "noveo/session_client.h"
+#include "ui/widgets/checkbox.h"
+#include "ui/widgets/labels.h"
+#include "styles/style_layers.h"
 #include "menu/menu_antispam_validator.h"
 #include "mtproto/mtproto_config.h"
 #include "apiwrap.h"
@@ -2058,6 +2063,43 @@ base::unique_qptr<Ui::PopupMenu> ParticipantsBoxController::rowContextMenu(
 			(participant->isUser()
 				? &st::menuIconProfile
 				: &st::menuIconInfo));
+	}
+	if (const auto api = _peer->session().account().noveoApi();
+		api && user && api->canManageMemberPermissions(_peer->id, user->id)) {
+		const auto show = delegate()->peerListUiShow();
+		const auto peerId = _peer->id;
+		const auto userId = user->id;
+		result->addAction(tr::lng_noveo_member_permissions(tr::now), [=] {
+			show->showBox(Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(tr::lng_noveo_member_permissions());
+				const auto status = box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_profile_loading(), st::boxLabel));
+				const auto messages = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_messages(tr::now), false, st::defaultBoxCheckbox));
+				const auto files = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_files(tr::now), false, st::defaultBoxCheckbox));
+				const auto members = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_members(tr::now), false, st::defaultBoxCheckbox));
+				const auto ready = box->lifetime().make_state<bool>(false);
+				messages->setEnabled(false); files->setEnabled(false); members->setEnabled(false);
+				api->memberPermissions(peerId, userId, crl::guard(box, [=](QJsonObject response, QString error) {
+					if (!error.isEmpty()) { status->setText(error); return; }
+					const auto permissions = response.value("effectivePermissions").toObject();
+					messages->setChecked(permissions.value("canSendMessages").toBool());
+					files->setChecked(permissions.value("canSendFiles").toBool());
+					members->setChecked(permissions.value("canAddMembers").toBool());
+					messages->setEnabled(true); files->setEnabled(true); members->setEnabled(true);
+					status->hide(); *ready = true;
+				}));
+				const auto save = [=](bool inherit) {
+					if (!*ready) return;
+					*ready = false;
+					api->setMemberPermissions(peerId, userId, {{"canSendMessages", inherit ? QJsonValue(QJsonValue::Null) : QJsonValue(messages->checked())}, {"canSendFiles", inherit ? QJsonValue(QJsonValue::Null) : QJsonValue(files->checked())}, {"canAddMembers", inherit ? QJsonValue(QJsonValue::Null) : QJsonValue(members->checked())}}, crl::guard(box, [=](QString error) {
+						*ready = true;
+						if (!error.isEmpty()) box->showToast(error); else box->closeBox();
+					}));
+				};
+				box->addButton(tr::lng_settings_save(), [=] { save(false); });
+				box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+				box->addLeftButton(tr::lng_noveo_permission_defaults(), [=] { save(true); });
+			}));
+		}, &st::menuIconPermissions);
 	}
 	if (user && SupportsMemberTags(_peer)) {
 		const auto isSelf = user->isSelf();

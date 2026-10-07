@@ -39,6 +39,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "noveo/session_client.h"
+#include "ui/widgets/fields/password_input.h"
 #include "platform/platform_webauthn.h"
 #include "settings/settings_builder.h"
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
@@ -1158,7 +1161,94 @@ void BuildConfirmationExtensions(SectionBuilder &builder) {
 	builder.addDividerText(tr::lng_settings_edit_extensions_about());
 }
 
+void BuildNoveoSecurity(SectionBuilder &builder) {
+	const auto controller = builder.controller();
+	const auto session = builder.session();
+	const auto api = session->account().noveoApi();
+	const auto showOther = builder.showOther();
+	builder.addSkip(st::settingsPrivacySkip);
+	builder.addButton({
+		.id = u"security/noveo_password"_q,
+		.title = tr::lng_noveo_change_password(),
+		.icon = { &st::menuIcon2SV },
+		.onClick = [=] {
+			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(tr::lng_noveo_change_password());
+				const auto current = box->addRow(object_ptr<Ui::PasswordInput>(box, st::defaultInputField, tr::lng_noveo_current_password()));
+				const auto password = box->addRow(object_ptr<Ui::PasswordInput>(box, st::defaultInputField, tr::lng_noveo_new_password()));
+				const auto confirm = box->addRow(object_ptr<Ui::PasswordInput>(box, st::defaultInputField, tr::lng_cloud_password_confirm_new()));
+				const auto busy = box->lifetime().make_state<bool>(false);
+				box->addButton(tr::lng_settings_save(), [=] {
+					if (*busy) return;
+					if (current->getLastText().isEmpty()) { current->showError(); return; }
+					if (password->getLastText().isEmpty()) { password->showError(); return; }
+					if (password->getLastText() != confirm->getLastText()) {
+						confirm->showError(); box->showToast(tr::lng_cloud_password_differ(tr::now)); return;
+					}
+					*busy = true;
+					current->setEnabled(false); password->setEnabled(false); confirm->setEnabled(false);
+					api->changePassword(current->getLastText(), password->getLastText(), crl::guard(box, [=](QString error) {
+						*busy = false;
+						current->setEnabled(true); password->setEnabled(true); confirm->setEnabled(true);
+						if (!error.isEmpty()) { box->showToast(error); return; }
+						current->clear(); password->clear(); confirm->clear(); box->closeBox();
+					}));
+				});
+				box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+			}));
+		},
+		.keywords = { u"password"_q, u"security"_q },
+	});
+	builder.addButton({
+		.id = u"security/passcode"_q,
+		.title = tr::lng_settings_passcode_title(),
+		.icon = { &st::menuIconLock },
+		.onClick = [=] { showOther(session->domain().local().hasLocalPasscode() ? LocalPasscodeCheckId() : LocalPasscodeCreateId()); },
+		.keywords = { u"passcode"_q, u"lock"_q },
+	});
+	builder.addButton({
+		.id = u"security/sessions"_q,
+		.title = tr::lng_settings_show_sessions(),
+		.icon = { &st::menuIconDevices },
+		.onClick = [=] { showOther(SessionsId()); },
+		.keywords = { u"sessions"_q, u"devices"_q },
+	});
+	builder.addButton({
+		.id = u"privacy/blocked"_q,
+		.title = tr::lng_settings_blocked_users(),
+		.icon = { &st::menuIconBlock },
+		.onClick = [=] { showOther(BlockedPeersId()); },
+		.keywords = { u"blocked"_q, u"privacy"_q },
+	});
+	builder.addButton({
+		.id = u"privacy/group_invites"_q,
+		.title = tr::lng_noveo_group_invites(),
+		.icon = { &st::menuIconGroups },
+		.onClick = [=] {
+			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+				box->setTitle(tr::lng_noveo_group_invites());
+				const auto block = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_block_group_invites(tr::now), api->blocksGroupInvites(), st::defaultBoxCheckbox));
+				const auto busy = box->lifetime().make_state<bool>(false);
+				box->addButton(tr::lng_settings_save(), [=] {
+					if (*busy) return;
+					*busy = true; block->setEnabled(false);
+					api->setBlockGroupInvites(block->checked(), crl::guard(box, [=](QString error) {
+						*busy = false; block->setEnabled(true);
+						if (!error.isEmpty()) box->showToast(error); else box->closeBox();
+					}));
+				});
+				box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+			}));
+		},
+		.keywords = { u"invite"_q, u"groups"_q, u"privacy"_q },
+	});
+}
+
 void BuildPrivacySecuritySectionContent(SectionBuilder &builder) {
+	if (builder.session()->account().noveoApi()) {
+		BuildNoveoSecurity(builder);
+		return;
+	}
 	auto updateOnTick = rpl::single(
 	) | rpl::then(base::timer_each(kUpdateTimeout));
 	const auto trigger = [&] {

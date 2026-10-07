@@ -65,7 +65,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/view/media_view_open_common.h"
 #include "mtproto/mtproto_dc_options.h"
 #include "mtproto/mtproto_config.h"
-#include "mtproto/web_proxy/web_proxy_transport.h"
 #include "media/audio/media_audio_track.h"
 #include "media/player/media_player_instance.h"
 #include "media/player/media_player_float.h"
@@ -213,35 +212,7 @@ Application::Application()
 		}
 	}, _lifetime);
 
-	MTP::WebProxy::Transport::StateChanges(
-	) | rpl::on_next([=](
-			const MTP::WebProxy::Transport::StateChange &change) {
-		using State = MTP::WebProxy::Transport::State;
-		if (change.state != State::WaitingForBrowser) {
-			if (_webProxyFallbackBox) {
-				_webProxyFallbackBox->closeBox();
-			}
-			return;
-		}
-		const auto &proxy = settings().proxy();
-		if (_webProxyFallbackBox
-			|| !proxy.isEnabled()
-			|| proxy.selected() != change.proxy) {
-			return;
-		}
-		_webProxyFallbackBox = Ui::show(Ui::MakeConfirmBox({
-			.text = tr::lng_proxy_web_fallback(tr::now),
-			.confirmed = [=] {
-				const auto &current = settings().proxy();
-				if (current.isEnabled()
-					&& current.selected() == change.proxy) {
-					MTP::WebProxy::Transport::OpenBrowser(change.proxy);
-				}
-			},
-			.confirmText = tr::lng_proxy_web_open(tr::now),
-			.cancelText = tr::lng_cancel(tr::now),
-		}));
-	}, _lifetime);
+
 }
 
 void Application::closeAdditionalWindows() {
@@ -281,7 +252,6 @@ Application::~Application() {
 
 	_private->proxyRotation = nullptr;
 	_domain->finish();
-	MTP::WebProxy::Transport::Shutdown();
 
 	Local::finish();
 
@@ -1920,15 +1890,6 @@ void Application::postponeCall(FnMut<void()> &&callable) {
 }
 
 void Application::refreshGlobalProxy() {
-	const auto &proxySettings = settings().proxy();
-	const auto proxy = proxySettings.isEnabled()
-		? proxySettings.selected()
-		: MTP::ProxyData();
-	if (proxy.type == MTP::ProxyData::Type::Web && proxy.valid()) {
-		MTP::WebProxy::Transport::Activate(proxy);
-	} else {
-		MTP::WebProxy::Transport::Deactivate();
-	}
 	Sandbox::Instance().refreshGlobalProxy();
 }
 

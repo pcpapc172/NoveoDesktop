@@ -33,6 +33,8 @@ public:
 	explicit AuthClient(QUrl endpoint = QUrl(QStringLiteral("wss://noveo.ir:8443/ws")));
 	~AuthClient();
 	void login(QString username, QString password);
+	bool submitTotp(QString code);
+	bool replaceToken(QString token, QString sessionId);
 	void restore(const QJsonObject &authorization, bool connectNow = true);
 	void setProxy(const QNetworkProxy &proxy);
 	void networkAvailable(bool available);
@@ -42,9 +44,12 @@ public:
 	bool send(const QJsonObject &message);
 	[[nodiscard]] QJsonObject authorization() const;
 	[[nodiscard]] bool authenticated() const;
+	[[nodiscard]] bool awaitingTotp() const { return _awaitingTotp; }
 
 	std::function<void(const QJsonObject&)> onAuthenticated;
+	std::function<void()> onAuthorizationChanged;
 	std::function<void(Error)> onError;
+	std::function<void()> onTotpRequired;
 	std::function<void(int)> onProxyChecked;
 	std::function<void(bool)> onConnectionChanged;
 	std::function<void(QString)> onDiagnostic;
@@ -70,6 +75,7 @@ private:
 	QByteArray _fragment;
 	QJsonObject _pending;
 	QJsonObject _authorization;
+	bool _awaitingTotp = false;
 	bool _probing = false;
 	bool _networkAvailable = true;
 	bool _upgraded = false;

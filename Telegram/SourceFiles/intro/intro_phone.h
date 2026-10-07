@@ -41,6 +41,10 @@ protected:
 	void resizeEvent(QResizeEvent *e) override;
 
 private:
+	bool _twoFactor = false;
+	void totpRequired();
+	void loginFailed(QString error);
+	object_ptr<Ui::InputField> _totp;
 	rpl::variable<bool> _submitting = false;
 	object_ptr<Ui::InputField> _username;
 	object_ptr<Ui::PasswordInput> _password;

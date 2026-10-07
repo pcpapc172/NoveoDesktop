@@ -9,7 +9,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/details/mtproto_dcenter.h"
 #include "mtproto/details/mtproto_rsa_public_key.h"
-#include "mtproto/special_config_request.h"
 #include "mtproto/session.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_dc_options.h"
@@ -253,7 +252,6 @@ private:
 
 	std::unique_ptr<ConfigLoader> _configLoader;
 	std::unique_ptr<DomainResolver> _domainResolver;
-	std::unique_ptr<SpecialConfigRequest> _httpUnixtimeLoader;
 	QString _userPhone;
 	mtpRequestId _cdnConfigLoadRequestId = 0;
 	crl::time _lastConfigLoadedTime = 0;
@@ -550,15 +548,7 @@ void Instance::Private::badConfigurationError() {
 }
 
 void Instance::Private::syncHttpUnixtime() {
-	if (isNoveo()) return;
-	if (base::unixtime::http_valid() || _httpUnixtimeLoader) {
-		return;
-	}
-	_httpUnixtimeLoader = std::make_unique<SpecialConfigRequest>([=] {
-		InvokeQueued(_instance, [=] {
-			_httpUnixtimeLoader = nullptr;
-		});
-	}, isTestMode(), configValues().txtDomainString);
+	// Noveo uses authenticated HTTPS/WSS and the system clock.
 }
 
 void Instance::Private::restartedByTimeout(ShiftedDcId shiftedDcId) {

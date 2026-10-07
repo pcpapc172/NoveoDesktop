@@ -63,7 +63,9 @@ public:
 		int streamVersion,
 		std::unique_ptr<SessionSettings> settings);
 
-	void loginNoveo(QString username, QString password, Fn<void(QString)> fail);
+	void loginNoveo(QString username, QString password, Fn<void(QString)> fail, Fn<void()> totpRequired = nullptr);
+	[[nodiscard]] bool noveoAwaitingTotp() const;
+	void submitNoveoTotp(QString code, Fn<void(QString)> fail);
 	void cancelNoveoLogin();
 	[[nodiscard]] Noveo::SessionClient *noveoApi() const {
 		return _noveoApi.get();
@@ -155,6 +157,7 @@ private:
 	std::unique_ptr<Noveo::AuthClient> _noveo;
 	std::unique_ptr<Noveo::SessionClient> _noveoApi;
 	Fn<void(QString)> _noveoLoginFail;
+	Fn<void()> _noveoTotpRequired;
 	std::unique_ptr<MTP::Instance> _mtp;
 	rpl::variable<MTP::Instance*> _mtpValue;
 	rpl::event_stream<MTPUpdates> _mtpUpdates;

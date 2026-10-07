@@ -8,7 +8,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/connection_tcp.h"
 
 #include "mtproto/details/mtproto_abstract_socket.h"
-#include "mtproto/details/mtproto_web_proxy_socket.h"
 #include "base/bytes.h"
 #include "base/openssl_help.h"
 #include "base/random.h"
@@ -532,13 +531,11 @@ void TcpConnection::connectToServer(
 		_port = port;
 		_protocol = Protocol::Create(secret);
 	}
-	_socket = (_proxy.type == ProxyData::Type::Web)
-		? std::make_unique<WebProxySocket>(thread(), _proxy)
-		: AbstractSocket::Create(
-			thread(),
-			secret,
-			ToNetworkProxy(_proxy),
-			protocolForFiles);
+	_socket = AbstractSocket::Create(
+		thread(),
+		secret,
+		ToNetworkProxy(_proxy),
+		protocolForFiles);
 	_protocolDcId = protocolDcId;
 
 	const auto postfix = _socket->debugPostfix();

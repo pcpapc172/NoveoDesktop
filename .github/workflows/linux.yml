@@ -270,7 +270,10 @@ jobs:
         run: |
           docker run --rm -u "$(id -u)" \
             -v "$PWD:/usr/src/tdesktop" "$IMAGE_TAG" \
-            strip --strip-unneeded \
+            strip --strip-all \
+            --remove-section=.comment \
+            --remove-section=.GCC.command.line \
+            --remove-section=.note.gnu.gold-version \
             /usr/src/tdesktop/out/Debug/artifact/Telegram \
             /usr/src/tdesktop/out/Debug/artifact/Updater
           ls -lh out/Debug/artifact/{Telegram,Updater}

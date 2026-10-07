@@ -87,7 +87,6 @@ public:
 	void shareItem(int id, bool qr);
 	void shareItems();
 	void applyItem(int id);
-	void openBrowser(int id);
 	object_ptr<Ui::BoxContent> editItemBox(int id);
 	object_ptr<Ui::BoxContent> addNewItemBox();
 	bool setProxySettings(ProxyData::Settings value);

@@ -53,6 +53,14 @@ async def main():
             if scenario == "malformed":
                 await ws.send_str("not json")
                 return ws
+            if scenario.startswith("totp"):
+                await ws.send_json({"type": "login_totp_required"})
+                verify = await ws.receive_json()
+                if scenario == "totp_retry":
+                    assert verify == {"type": "login_totp_verify", "code": "000000"}
+                    await ws.send_json({"type": "login_totp_error", "message": "Invalid code"})
+                    verify = await ws.receive_json()
+                assert verify == {"type": "login_totp_verify", "code": "123456"}
             payload = json.dumps({"type": "login_success", "token": "test-token",
                                   "user": {"userId": "test-user", "username": "test-user"}})
             if scenario == "fragment":
@@ -82,7 +90,7 @@ async def main():
         socks = SocksFixture()
         socks_port = await socks.start()
         try:
-            for scenario in ("success", "invalid", "rate", "malformed", "fragment", "restore", "reconnect", "revoked", "untrusted", "heartbeat", "offline", "proxy", "proxy_switch", "proxy_disable", "probe", "probe_error"):
+            for scenario in ("totp", "totp_retry", "success", "invalid", "rate", "malformed", "fragment", "restore", "reconnect", "revoked", "untrusted", "heartbeat", "offline", "proxy", "proxy_switch", "proxy_disable", "probe", "probe_error"):
                 proc = await asyncio.create_subprocess_exec(str(binary), f"wss://localhost:{port}/{scenario}", scenario, str(cert), str(socks_port))
                 code = await proc.wait()
                 assert code == 0, (scenario, code)

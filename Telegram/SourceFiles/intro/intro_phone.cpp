@@ -22,8 +22,11 @@ PhoneWidget::PhoneWidget(
 	not_null<Main::Account*> account,
 	not_null<Data*> data)
 : Step(parent, account, data)
+, _totp(this, st::introName, tr::lng_noveo_totp_code())
 , _username(this, st::introName, tr::lng_noveo_login_username())
 , _password(this, st::introPassword, tr::lng_noveo_login_password()) {
+	_totp->hide();
+	_totp->submits() | rpl::on_next([this] { submit(); }, lifetime());
 	setTitleText(tr::lng_noveo_login_title());
 	setDescriptionText(tr::lng_noveo_login_description());
 	setErrorCentered(true);
@@ -62,12 +65,20 @@ QString PhoneWidget::accessibilityName() {
 void PhoneWidget::resizeEvent(QResizeEvent *e) {
 	Step::resizeEvent(e);
 	_username->moveToLeft(contentLeft(), contentTop() + st::introStepFieldTop);
+	_totp->moveToLeft(contentLeft(), contentTop() + st::introStepFieldTop);
 	_password->moveToLeft(contentLeft(),
 		_username->y() + _username->height() + st::introPhoneTop);
 }
 
 void PhoneWidget::submit() {
 	if (isHidden() || _submitting.current()) {
+		return;
+	} else if (_twoFactor) {
+		_submitting = true;
+		_totp->setEnabled(false);
+		account().submitNoveoTotp(_totp->getLastText(), crl::guard(this, [this](QString error) {
+			loginFailed(std::move(error));
+		}));
 		return;
 	} else if (_username->getLastText().trimmed().isEmpty()) {
 		_username->showError();
@@ -85,33 +96,66 @@ void PhoneWidget::submit() {
 	_username->setEnabled(false);
 	_password->setEnabled(false);
 	account().loginNoveo(_username->getLastText().trimmed(), _password->getLastText(),
-		crl::guard(this, [this](QString error) {
-			_submitting = false;
-			_username->setEnabled(true);
-			_password->setEnabled(true);
-			_password->clear();
-			_password->setFocusFast();
-			showError(rpl::single(std::move(error)));
-		}));
+		crl::guard(this, [this](QString error) { loginFailed(std::move(error)); }),
+		crl::guard(this, [this] { totpRequired(); }));
+}
+
+void PhoneWidget::totpRequired() {
+	_twoFactor = true;
+	_submitting = false;
+	_password->clear();
+	_username->hide();
+	_password->hide();
+	_totp->show();
+	_totp->setEnabled(true);
+	setDescriptionText(tr::lng_noveo_totp_description());
+	_totp->setFocusFast();
+}
+
+void PhoneWidget::loginFailed(QString error) {
+	if (_twoFactor && !account().noveoAwaitingTotp()) cancelled();
+	_submitting = false;
+	if (_twoFactor) {
+		_totp->setEnabled(true);
+		_totp->clear();
+		_totp->setFocusFast();
+	} else {
+		_username->setEnabled(true);
+		_password->setEnabled(true);
+		_password->clear();
+		_password->setFocusFast();
+	}
+	showError(rpl::single(std::move(error)));
 }
 
 void PhoneWidget::setInnerFocus() {
-	_username->setFocusFast();
+	if (_twoFactor) _totp->setFocusFast();
+	else _username->setFocusFast();
 }
 
 void PhoneWidget::activate() {
 	Step::activate();
 	showChildren();
+	if (_twoFactor) { _username->hide(); _password->hide(); }
+	else _totp->hide();
 	setInnerFocus();
 }
 
 void PhoneWidget::finished() {
 	Step::finished();
+	_totp->clear();
 	_password->clear();
 }
 
 void PhoneWidget::cancelled() {
 	account().cancelNoveoLogin();
+	_twoFactor = false;
+	_totp->clear();
+	_totp->hide();
+	_totp->setEnabled(true);
+	_username->show();
+	_password->show();
+	setDescriptionText(tr::lng_noveo_login_description());
 	_submitting = false;
 	_username->setEnabled(true);
 	_password->setEnabled(true);

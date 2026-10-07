@@ -508,12 +508,21 @@ void SessionClient::setProxy(const QNetworkProxy &proxy) {
 }
 
 void SessionClient::disconnected() {
+	const auto requests = std::move(_wireRequests);
+	_wireRequests.clear();
+	for (const auto &request : requests) {
+		_pending.remove(request.id); fail(request.id, "NOVEO_DISCONNECTED");
+	}
 	_historyReady = false;
 	_historyRequests.clear();
 }
 
 void SessionClient::reset() {
 	_deadline.stop();
+	const auto actions = std::move(_actionErrors);
+	_actionErrors.clear();
+	_wireRequests.clear();
+	for (const auto &done : actions) done("NOVEO_DISCONNECTED");
 	_pending.clear();
 	for (const auto id : _transfers.keys()) {
 		cancel(id);
@@ -548,15 +557,33 @@ void SessionClient::reset() {
 	_deferredChats = {};
 	_giftsLoading = false;
 	_voiceState = {};
+	_wireRequests.clear();
+	_contextPeers.clear();
+	_globalSearchResults.clear();
+	_chatProfiles.clear();
+	_memberPermissionsLoading.clear();
+	_chatProfilesLoading.clear();
+	_blocked.clear();
+	_sessionIds.clear();
+	_pins.clear();
 	_self.clear();
 	_historyReady = _contactsReady = false;
 }
 
 void SessionClient::fail(mtpRequestId id, const QString &reason) {
+	_globalSearchResults.remove(id);
+	if (_actionErrors.contains(id)) {
+		const auto done = _actionErrors.take(id); done(reason); return;
+	}
 	reply(id, MTPRpcError(MTP_rpc_error(MTP_int(400), MTP_string(reason))));
 }
 
 void SessionClient::cancel(mtpRequestId id) {
+	_globalSearchResults.remove(id);
+	for (auto i = _wireRequests.begin(); i != _wireRequests.end();) {
+		if (i->id == id) i = _wireRequests.erase(i); else ++i;
+	}
+	wireNext();
 	const auto transfer = _transfers.take(id);
 	if (transfer) {
 		transfer->abort();
@@ -597,7 +624,7 @@ MTPUser SessionClient::user(const QJsonObject &profile, bool contact) {
 		flags |= MTPDuser::Flag::f_self;
 	}
 	if (contact || profile.value("isContact").toBool()
-		|| (_users.contains(id.bare) && _users.value(id.bare).c_user().is_contact())) {
+		|| (!profile.contains("isContact") && _users.contains(id.bare) && _users.value(id.bare).c_user().is_contact())) {
 		flags |= MTPDuser::Flag::f_contact;
 	}
 	if (profile.value("isDisabled").toBool()) {
@@ -656,6 +683,7 @@ void SessionClient::users(const QJsonArray &profiles, bool contact) {
 		for (auto i = profile.begin(); i != profile.end(); ++i) {
 			merged.insert(i.key(), i.value());
 		}
+		if (contact) merged.insert("isContact", true);
 		_profiles[NativeUserId(RawId(profile)).bare] = merged;
 		const auto native = user(merged, contact);
 		_users[native.c_user().vid().v] = native;
@@ -698,6 +726,14 @@ void SessionClient::contacts() {
 		}
 		if (ok) {
 			const auto profiles = document.object().value("contacts").toArray();
+			auto current = QSet<QString>();
+			for (const auto value : profiles) current.insert(RawId(value.toObject()));
+			for (const auto &contact : _contacts) {
+				const auto uid = uint64(contact.c_contact().vuser_id().v);
+				if (!current.contains(_rawUsers.value(uid))) {
+					auto profile = _profiles.value(uid); profile.insert("isContact", false); profile.insert("contactName", ""); users(QJsonArray{profile});
+				}
+			}
 			users(profiles, true);
 			_contacts.clear();
 			for (const auto value : profiles) {
@@ -708,6 +744,7 @@ void SessionClient::contacts() {
 				}
 			}
 			_contactsReady = true;
+			if (onUpdate) onUpdate(updates({}));
 			drain();
 		} else {
 			auto failed = QVector<mtpRequestId>();
@@ -894,7 +931,13 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 			replyRaw = Text(nested.value("id"));
 		}
 	}
+	if (!replyRaw.isEmpty() && !_messageIds.contains(replyRaw)) {
+		const auto parentId = --_olderMessage;
+		_messageIds[replyRaw] = parentId;
+		_rawMessages[parentId] = replyRaw;
+	}
 	const auto replyId = _messageIds.value(replyRaw);
+	if (replyId) _contextPeers[replyId] = peer;
 	if (replyId) {
 		flags |= MTPDmessage::Flag::f_reply_to;
 	}
@@ -914,8 +957,9 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 	if (!url.isEmpty()) {
 		_files[NativeUserId("noveo-file:" + url.toString()).bare] = file;
 	}
-	const auto media
-		= file.isEmpty() ? MTPMessageMedia(MTP_messageMediaEmpty()) : FileMedia(file, Date(object));
+	const auto poll = content.toObject().value("poll").toObject();
+	const auto media = !poll.isEmpty() ? pollMedia(poll, raw)
+		: file.isEmpty() ? MTPMessageMedia(MTP_messageMediaEmpty()) : FileMedia(file, Date(object));
 	if (media.type() != mtpc_messageMediaEmpty) {
 		flags |= MTPDmessage::Flag::f_media;
 	}
@@ -955,6 +999,9 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		}
 	}
 
+	auto editedAt = object.value("editedAt").toVariant().toLongLong();
+	if (editedAt > 100000000000LL) editedAt /= 1000;
+	if (editedAt > 0) flags |= MTPDmessage::Flag::f_edit_date;
 	const auto entities = Markdown(text);
 	const auto markup = InlineKeyboard(content.toObject());
 	if (!entities.v.isEmpty()) flags |= MTPDmessage::Flag::f_entities;
@@ -971,7 +1018,7 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 			MTP_int(replyId), MTPPeer(), MTPMessageFwdHeader(), MTPMessageMedia(), MTPint(),
 			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(), MTPint(), MTPbytes()),
 		MTP_int(Date(object)), MTP_string(text), media, markup,
-		entities, MTPint(), MTPint(), MTPMessageReplies(), MTPint(),
+		entities, MTPint(), MTPint(), MTPMessageReplies(), MTP_int(editedAt),
 		MTPstring(), MTPlong(), reactions, MTPVector<MTPRestrictionReason>(), MTPint(),
 		MTPint(), MTPlong(), MTPFactCheck(), MTPint(), MTPlong(), MTPSuggestedPost(), MTPint(),
 		MTPstring(), MTPRichMessage());
@@ -1034,20 +1081,8 @@ void SessionClient::history(const QJsonArray &chats) {
 			const auto id = NativeUserId(raw).bare;
 			const auto channel = type == "channel";
 			peer = channel ? peerFromChannel(ChannelId(id)) : peerFromChat(ChatId(id));
-			_chats[peer.value] = channel
-				? MTPChat(MTP_channel(
-					  MTP_flags(MTPDchannel::Flag::f_broadcast | MTPDchannel::Flag::f_access_hash),
-					  MTP_long(id), MTP_long(1), MTP_string(name), MTPstring(),
-					  MTPChatPhoto(MTP_chatPhotoEmpty()), MTPint(),
-					  MTPVector<MTPRestrictionReason>(), MTPChatAdminRights(),
-					  MTPChatBannedRights(), MTPChatBannedRights(), MTPint(),
-					  MTPVector<MTPUsername>(), MTPRecentStory(), MTPPeerColor(), MTPPeerColor(),
-					  MTPEmojiStatus(), MTPint(), MTPint(), MTPlong(), MTPlong(), MTPlong(),
-					  MTPlong()))
-				: MTPChat(MTP_chat(MTP_flags(MTPDchat::Flags()), MTP_long(id), MTP_string(name),
-					  MTPChatPhoto(MTP_chatPhotoEmpty()),
-					  MTP_int(object.value("members").toArray().size()), MTPint(), MTP_int(1),
-					  MTPInputChannel(), MTPChatAdminRights(), MTPChatBannedRights()));
+			auto profile = object; profile.insert("previewOnly", false); profile.insert("isMember", true);
+			_chats[peer.value] = nativeChat(profile);
 			const auto url = Avatar(object);
 			if (!url.isEmpty() || object.contains("avatarUrl") || object.contains("avatar")
 				|| object.contains("photo") || object.contains("image")) {
@@ -1114,6 +1149,11 @@ void SessionClient::history(const QJsonArray &chats) {
 		std::sort(messages.begin(), messages.end(),
 			[](const auto &a, const auto &b) { return MessageId(a) < MessageId(b); });
 		_messages[peer.value] = messages;
+		if (object.contains("pinnedMessage")) {
+			const auto pinned = object.value("pinnedMessage").toObject();
+			if (pinned.isEmpty()) _pins.remove(raw);
+			else { const auto native = nativeMessage(pinned, peer); _pins[raw] = MessageId(native); cacheMessages(peer, QJsonArray{pinned}); }
+		}
 		const auto top = messages.isEmpty() ? 0 : MessageId(messages.back());
 		const auto unread = std::max(0, object.value("unreadCount").toInt());
 		_dialogs[peer.value] = MTP_dialog(MTP_flags(MTPDdialog::Flags()), MTPPeer(peerToMTP(peer)),
@@ -1135,6 +1175,18 @@ void SessionClient::history(const QJsonArray &chats) {
 }
 
 void SessionClient::message(const QJsonObject &frame) {
+	if (frame.value("type") == "message_context") {
+		cacheMessages(_chatPeers.value(frame.value("chatId").toString()), frame.value("messages").toArray());
+	}
+	if (frame.value("type") == "chat_message_search_results") {
+		const auto id = frame.value("requestId").toString().toInt();
+		if (_globalSearchResults.contains(id)) {
+			const auto peer = _chatPeers.value(frame.value("chatId").toString());
+			cacheMessages(peer, frame.value("messages").toArray());
+			for (const auto object : frame.value("messages").toArray()) _globalSearchResults[id].push_back(nativeMessage(object.toObject(), peer));
+		}
+	}
+	wireEvent(frame);
 	const auto type = frame.value("type").toString();
 	if (frame.value("activeVoiceChats").isObject()) {
 		_voiceState = frame.value("activeVoiceChats").toObject();
@@ -1168,6 +1220,23 @@ void SessionClient::message(const QJsonObject &frame) {
 			}
 		}
 		_auth->send({ { "type", "resync_state" } });
+	} else if (type == "blocked_list_update") {
+		_blocked.clear();
+		for (const auto value : frame.value("blockedUsers").toArray()) {
+			const auto raw = value.isString() ? value.toString() : RawId(value.toObject());
+			if (!raw.isEmpty()) _blocked.insert(raw);
+		}
+	} else if (type == "chat_updated" || type == "chat_member_added" || type == "chat_member_removed"
+		|| type == "user_left_chat" || type == "left_group" || type == "chat_admins_updated" || type == "chat_permissions_updated" || type == "chat_member_permissions_updated") {
+		const auto peer = _chatPeers.value(frame.value("chatId").toString());
+		if (type == "chat_member_permissions_updated") _chatProfiles[peer.value].insert("selfPermissions", frame.value("permissions"));
+		else { _chatProfiles[peer.value].remove("selfPermissions"); _chatProfiles[peer.value].remove("canManageSettings"); }
+		_auth->send({{"type", "resync_state"}});
+	} else if (type == "chat_deleted" || type == "removed_from_chat") {
+		const auto peer = _chatPeers.value(frame.value("chatId").toString());
+		_dialogs.remove(peer.value); _messages.remove(peer.value);
+		if (onDialogs) onDialogs(dialogs());
+		_auth->send({{"type", "resync_state"}});
 	} else if (type == "typing" || type == "emoji_interaction" || type == "emoji_interaction_seen") {
 		const auto peer = _chatPeers.value(Text(frame.value("chatId")));
 		const auto sender = Text(frame.value("senderId")).isEmpty() ? Text(frame.value("sender")) : Text(frame.value("senderId"));
@@ -1212,12 +1281,37 @@ void SessionClient::message(const QJsonObject &frame) {
 		const auto mid = _messageIds.value(Text(frame.value("messageId")));
 		if (!peer || !mid) return;
 		auto object = _messageObjects.value(mid);
-		object.insert("content", frame.contains("newContent") ? frame.value("newContent") : frame.value("content"));
+		auto content = frame.contains("newContent") ? frame.value("newContent") : frame.value("content");
+		if (content.isString()) {
+			const auto parsed = QJsonDocument::fromJson(content.toString().toUtf8());
+			if (parsed.isObject()) content = parsed.object();
+			else { auto previous = object.value("content").toObject(); previous.insert("text", content); content = previous; }
+		}
+		object.insert("content", content);
+		object.insert("editedAt", frame.contains("editedAt") ? frame.value("editedAt") : QJsonValue(QDateTime::currentSecsSinceEpoch()));
 		const auto native = nativeMessage(object, peer);
 		for (auto &row : _messages[peer.value]) if (MessageId(row) == mid) row = native;
 		if (onUpdate) onUpdate(updates({peerIsChannel(peer)
 			? MTPUpdate(MTP_updateEditChannelMessage(native, MTP_int(++_pts), MTP_int(1)))
 			: MTPUpdate(MTP_updateEditMessage(native, MTP_int(++_pts), MTP_int(1)))}));
+	} else if (type == "message_deleted" || type == "message_deleted_local" || type == "message_delete" || type == "delete_message") {
+		const auto peer = _chatPeers.value(Text(frame.value("chatId")));
+		removeMessage(peer, _messageIds.value(Text(frame.value("messageId"))));
+	} else if (type == "message_pinned" || type == "message_unpinned") {
+		const auto chat = Text(frame.value("chatId"));
+		const auto peer = _chatPeers.value(chat);
+		if (!peer) return;
+		const auto pinned = frame.value("message").toObject();
+		if (!pinned.isEmpty()) cacheMessages(peer, QJsonArray{ pinned });
+		const auto mid = _messageIds.value(Text(pinned.value("messageId")));
+		const auto previous = _pins.value(chat);
+		_pins[chat] = type == "message_pinned" ? mid : 0;
+		if (onUpdate && (mid || previous)) {
+			const auto ids = MTP_vector<MTPint>(QVector<MTPint>{ MTP_int(mid ? mid : previous) });
+			onUpdate(updates({peerIsChannel(peer)
+				? MTPUpdate(MTP_updatePinnedChannelMessages(MTP_flags(type == "message_pinned" ? MTPDupdatePinnedChannelMessages::Flag::f_pinned : MTPDupdatePinnedChannelMessages::Flags()), MTP_long(peerToChannel(peer).bare), ids, MTP_int(++_pts), MTP_int(1)))
+				: MTPUpdate(MTP_updatePinnedMessages(MTP_flags(type == "message_pinned" ? MTPDupdatePinnedMessages::Flag::f_pinned : MTPDupdatePinnedMessages::Flags()), peerToMTP(peer), ids, MTP_int(++_pts), MTP_int(1)))}));
+		}
 	} else if (type == "user_updated") {
 		users(QJsonArray{frame.value("user").isObject() ? frame.value("user") : QJsonValue(frame)});
 		if (onUpdate) onUpdate(updates({}));
@@ -1481,7 +1575,7 @@ QJsonObject SessionClient::mediaFile(const MTPInputMedia &media) const {
 }
 
 void SessionClient::upload(
-	mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done) {
+	mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done, QString path, QString chatId) {
 	const auto existing = mediaFile(media);
 	if (!existing.isEmpty()) {
 		done(existing);
@@ -1490,6 +1584,36 @@ void SessionClient::upload(
 	auto input = MTPInputFile();
 	auto metadata = QJsonObject();
 	auto mime = QString("image/jpeg");
+	if (media.type() == mtpc_inputMediaPoll) {
+		const auto &data = media.c_inputMediaPoll();
+		const auto &poll = data.vpoll().c_poll();
+		if (data.vattached_media() || data.vsolution_media() || poll.is_open_answers() || poll.is_subscribers_only()) {
+			cancel(id); fail(id, "NOVEO_POLL_UNSUPPORTED"); return;
+		}
+		auto options = QJsonArray();
+		auto ids = QStringList();
+		for (const auto &answer : poll.vanswers().v) {
+			const auto &a = answer.c_pollAnswer();
+			if (a.vmedia()) { cancel(id); fail(id, "NOVEO_POLL_UNSUPPORTED"); return; }
+			const auto option = QString::fromLatin1(a.voption().v.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+			ids.push_back(option);
+			options.push_back(QJsonObject{{"id", option}, {"text", qs(a.vtext().c_textWithEntities().vtext())}});
+		}
+		auto object = QJsonObject{{"question", qs(poll.vquestion().c_textWithEntities().vtext())}, {"options", options},
+			{"anonymous", !poll.is_public_voters()}, {"examMode", poll.is_quiz()}, {"multipleChoice", poll.is_multiple_choice()},
+			{"revotingDisabled", poll.is_revoting_disabled()}, {"shuffleAnswers", poll.is_shuffle_answers()}, {"resultsAfterVote", poll.is_hide_results_until_close()}};
+		if (poll.vclose_date()) object.insert("expiresAt", poll.vclose_date()->v);
+		if (poll.vclose_period()) object.insert("durationSeconds", poll.vclose_period()->v);
+		if (data.vsolution()) object.insert("solution", qs(*data.vsolution()));
+		if (data.vcorrect_answers()) {
+			auto correct = QJsonArray();
+			for (const auto index : data.vcorrect_answers()->v) if (index.v >= 0 && index.v < ids.size()) correct.push_back(ids[index.v]);
+			object.insert("correctOptionIds", correct);
+			if (!correct.isEmpty()) object.insert("correctOptionId", correct.first());
+		}
+		done({{"poll", object}});
+		return;
+	}
 	if (media.type() == mtpc_inputMediaUploadedPhoto) {
 		input = media.c_inputMediaUploadedPhoto().vfile();
 	} else if (media.type() == mtpc_inputMediaUploadedDocument) {
@@ -1624,12 +1748,17 @@ void SessionClient::upload(
 	name.replace('"', '_').replace('\\', '_').replace('\r', '_').replace('\n', '_');
 	QHttpPart part;
 	part.setHeader(QNetworkRequest::ContentDispositionHeader,
-		"form-data; name=\"file\"; filename=\"" + name + "\"");
+		"form-data; name=\"" + (chatId.isEmpty() ? QString("file") : QString("avatar")) + "\"; filename=\"" + name + "\"");
 	part.setHeader(QNetworkRequest::ContentTypeHeader, mime);
 	part.setBodyDevice(file);
 	multipart->append(part);
+	if (!chatId.isEmpty()) {
+		QHttpPart chat;
+		chat.setHeader(QNetworkRequest::ContentDispositionHeader, "form-data; name=\"chatId\"");
+		chat.setBody(chatId.toUtf8()); multipart->append(chat);
+	}
 	const auto authorization = _auth->authorization();
-	QNetworkRequest request(_apiEndpoint.resolved(QUrl("/upload/file")));
+	QNetworkRequest request(_apiEndpoint.resolved(QUrl(path)));
 	request.setRawHeader("X-User-ID", _self.toUtf8());
 	request.setRawHeader("X-Auth-Token", authorization.value("token").toString().toUtf8());
 	request.setRawHeader(
@@ -1650,7 +1779,7 @@ void SessionClient::upload(
 		}
 	});
 	connect(reply, &QNetworkReply::finished, this,
-		[this, reply, response, id, authorization, metadata, mime, done = std::move(done)] {
+		[this, reply, response, id, authorization, metadata, mime, path, done = std::move(done)] {
 			reply->deleteLater();
 			if (_transfers.value(id) != reply || !_pending.contains(id)) {
 				return;
@@ -1661,7 +1790,9 @@ void SessionClient::upload(
 			const auto status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 			const auto ok
 				= reply->error() == QNetworkReply::NoError && status >= 200 && status < 300;
-			auto file = QJsonDocument::fromJson(*response).object().value("file").toObject();
+			const auto object = QJsonDocument::fromJson(*response).object();
+			auto file = object.value("file").toObject();
+			if (path != "/upload/file" && object.value("success").toBool()) file.insert("url", object.value("url"));
 			_transfers.remove(id);
 			if (!ok || authorization != _auth->authorization() || FileUrl(file).isEmpty()) {
 				cancel(id);
@@ -1862,7 +1993,7 @@ bool SessionClient::mediaRequest(mtpRequestId id, const mtpBuffer &body) {
 			_pending.remove(id);
 			reply(id, FileMedia(file, int(QDateTime::currentSecsSinceEpoch())));
 		} else {
-			send(id, inputPeer(peer), QJsonObject{{"text", qs(text)}, {"file", file}}, random.v,
+			send(id, inputPeer(peer), QJsonObject{{"text", qs(text)}, {file.contains("poll") ? "poll" : "file", file.contains("poll") ? file.value("poll") : QJsonValue(file)}}, random.v,
 				replyTo, hasReply);
 		}
 	});
@@ -1892,18 +2023,20 @@ MTPPeerNotifySettings SessionClient::notify(PeerId peer, QString category) const
 }
 
 void SessionClient::api(mtpRequestId id, const QString &path, const QJsonObject &body,
-		std::function<void(QJsonObject)> done, bool post, std::function<void(QString)> failed) {
+		std::function<void(QJsonObject)> done, bool post, std::function<void(QString)> failed, bool keepPending, QHttpMultiPart *multipart) {
 	if (_transfers.contains(id)) return;
 	const auto authorization = _auth->authorization();
 	QNetworkRequest request(_apiEndpoint.resolved(QUrl(path)));
 	request.setRawHeader("X-User-ID", _self.toUtf8());
 	request.setRawHeader("X-Auth-Token", authorization.value("token").toString().toUtf8());
 	request.setRawHeader("Origin", "https://noveo.ir");
-	request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+	if (!multipart) request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
 	request.setTransferTimeout(20000);
-	const auto transfer = post ? _http.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact))
+	const auto transfer = multipart ? _http.post(request, multipart)
+		: post ? _http.post(request, QJsonDocument(body).toJson(QJsonDocument::Compact))
 		: _http.get(request);
+	if (multipart) multipart->setParent(transfer);
 	_transfers[id] = transfer;
 	const auto response = std::make_shared<QByteArray>();
 	connect(transfer, &QNetworkReply::readyRead, this, [transfer, response] {
@@ -1911,7 +2044,7 @@ void SessionClient::api(mtpRequestId id, const QString &path, const QJsonObject 
 		if (response->size() > 8 * 1024 * 1024) transfer->abort();
 	});
 	connect(transfer, &QNetworkReply::finished, this,
-		[this, id, transfer, response, authorization, done = std::move(done), failed = std::move(failed)] {
+		[this, id, transfer, response, authorization, keepPending, done = std::move(done), failed = std::move(failed)] {
 			transfer->deleteLater();
 			if (_transfers.value(id) != transfer || (id > 0 && !_pending.contains(id))) return;
 			_transfers.remove(id);
@@ -1930,7 +2063,7 @@ void SessionClient::api(mtpRequestId id, const QString &path, const QJsonObject 
 				}
 				return;
 			}
-			_pending.remove(id);
+			if (!keepPending) _pending.remove(id);
 			done(document.object());
 		});
 }
@@ -2346,7 +2479,7 @@ void SessionClient::drain() {
 		const auto now = int(QDateTime::currentSecsSinceEpoch());
 		const auto state = MTPupdates_State(
 			MTP_updates_state(MTP_int(_pts), MTP_int(0), MTP_int(now), MTP_int(0), MTP_int(0)));
-		if (featureRequest(id, body) || mediaRequest(id, body)) {
+		if (parityRequest(id, body) || featureRequest(id, body) || mediaRequest(id, body)) {
 			continue;
 		}
 		if (type == mtpc_updates_getState) {
@@ -2590,6 +2723,7 @@ void SessionClient::drain() {
 			const auto full = MTPUserFull(MTP_userFull(MTP_flags(MTPDuserFull::Flag::f_about
 				| MTPDuserFull::Flag::f_stargifts_count | MTPDuserFull::Flag::f_display_gifts_button
 				| MTPDuserFull::Flag::f_phone_calls_available
+				| (_blocked.contains(_rawUsers.value(uid)) ? MTPDuserFull::Flag::f_blocked : MTPDuserFull::Flag())
 				| (photo.type() == mtpc_photo ? MTPDuserFull::Flag::f_profile_photo : MTPDuserFull::Flag())),
 				MTP_long(uid), MTP_string(Text(_profiles.value(uid).value("bio"))),
 				MTP_peerSettings(MTP_flags(MTPDpeerSettings::Flags()), MTPint(), MTPstring(),

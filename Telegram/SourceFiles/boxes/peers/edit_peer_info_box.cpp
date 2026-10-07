@@ -14,6 +14,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_statistics.h"
 #include "api/api_user_names.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "noveo/session_client.h"
 #include "ui/boxes/confirm_box.h"
 #include "base/event_filter.h"
 #include "boxes/peers/edit_participants_box.h"
@@ -394,6 +396,35 @@ void SaveBoostsUnrestrict(
 void ShowEditPermissions(
 		not_null<Window::SessionNavigation*> navigation,
 		not_null<PeerData*> peer) {
+	if (const auto api = peer->session().account().noveoApi()) {
+		navigation->parentController()->show(Box([=](not_null<Ui::GenericBox*> box) {
+			box->setTitle(tr::lng_noveo_chat_permissions());
+			const auto status = box->addRow(object_ptr<Ui::FlatLabel>(box, tr::lng_profile_loading(), st::boxLabel));
+			const auto messages = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_messages(tr::now), false, st::defaultBoxCheckbox));
+			const auto files = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_files(tr::now), false, st::defaultBoxCheckbox));
+			const auto members = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_members(tr::now), false, st::defaultBoxCheckbox));
+			const auto visible = box->addRow(object_ptr<Ui::Checkbox>(box, tr::lng_noveo_permission_view_members(tr::now), false, st::defaultBoxCheckbox));
+			const auto ready = box->lifetime().make_state<bool>(false);
+			messages->setEnabled(false); files->setEnabled(false); members->setEnabled(false); visible->setEnabled(false);
+			api->chatPermissions(peer->id, crl::guard(box, [=](QJsonObject permissions, QString error) {
+				if (!error.isEmpty()) { status->setText(error); return; }
+				messages->setChecked(permissions.value("canSendMessages").toBool(true)); files->setChecked(permissions.value("canSendFiles").toBool(true));
+				members->setChecked(permissions.value("canAddMembers").toBool(true)); visible->setChecked(permissions.value("canViewMembers").toBool(true));
+				messages->setEnabled(true); files->setEnabled(true); members->setEnabled(true); visible->setEnabled(true);
+				status->hide(); *ready = true;
+			}));
+			box->addButton(tr::lng_settings_save(), [=] {
+				if (!*ready) return;
+				*ready = false;
+				api->setChatPermissions(peer->id, {{"canSendMessages", messages->checked()}, {"canSendFiles", files->checked()}, {"canAddMembers", members->checked()}, {"canViewMembers", visible->checked()}}, crl::guard(box, [=](QString error) {
+					*ready = true;
+					if (!error.isEmpty()) box->showToast(error); else box->closeBox();
+				}));
+			});
+			box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+		}));
+		return;
+	}
 	const auto show = navigation->uiShow();
 	auto createBox = [=](not_null<Ui::GenericBox*> box) {
 		const auto saving = box->lifetime().make_state<int>(0);

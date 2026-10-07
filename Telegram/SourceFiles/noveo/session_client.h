@@ -19,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkAccessManager>
 
+class QHttpMultiPart;
+
 namespace Noveo {
 
 [[nodiscard]] UserId NativeUserId(const QString &rawId);
@@ -44,6 +46,16 @@ public:
 	void voiceToken(QString chatId, QString callId,
 		std::function<void(QJsonObject, QString)> done);
 	std::function<void(const QJsonObject &)> onVoiceEvent;
+	[[nodiscard]] bool canManageMemberPermissions(PeerId peer, PeerId member) const;
+	void chatPermissions(PeerId peer, std::function<void(QJsonObject, QString)> done);
+	void setChatPermissions(PeerId peer, QJsonObject permissions, std::function<void(QString)> done);
+	void memberPermissions(PeerId peer, PeerId member, std::function<void(QJsonObject, QString)> done);
+	void setMemberPermissions(PeerId peer, PeerId member, QJsonObject permissions, std::function<void(QString)> done);
+	[[nodiscard]] bool needsJoin(PeerId peer) const;
+	void joinChat(PeerId peer, std::function<void(QString)> done);
+	void changePassword(QString current, QString password, std::function<void(QString)> done);
+	[[nodiscard]] bool blocksGroupInvites() const;
+	void setBlockGroupInvites(bool block, std::function<void(QString)> done);
 	void giftAction(const QString &action, const QString &giftId, PeerId peer,
 		std::function<void(QString)> done);
 	[[nodiscard]] QJsonObject giftDetails(int messageId) const;
@@ -75,14 +87,43 @@ private:
 		int remaining = 0;
 		QVector<MTPUpdate> updates;
 	};
+	struct WireRequest {
+		mtpRequestId id;
+		QVector<QJsonObject> frames;
+		QStringList replies;
+		std::function<void(QJsonObject)> done;
+		bool sent = false;
+	};
+	QVector<WireRequest> _wireRequests;
+	QMap<uint64, QJsonObject> _chatProfiles;
+	QSet<QString> _memberPermissionsLoading;
+	QSet<QString> _chatProfilesLoading;
+	QSet<QString> _blocked;
+	QMap<uint64, QString> _sessionIds;
+	QMap<QString, int> _pins;
+	QMap<int, PeerId> _contextPeers;
+	QMap<mtpRequestId, QVector<MTPMessage>> _globalSearchResults;
+	QMap<mtpRequestId, std::function<void(QString)>> _actionErrors;
+	bool parityRequest(mtpRequestId id, const mtpBuffer &body);
+	void wire(mtpRequestId id, QVector<QJsonObject> frames, QStringList replies,
+		std::function<void(QJsonObject)> done);
+	void wireNext();
+	void wireEvent(const QJsonObject &frame);
+	void removeMessage(PeerId peer, int id);
+	void cacheMessages(PeerId peer, const QJsonArray &messages);
+	MTPmessages_Messages messagePage(PeerId peer, QVector<MTPMessage> messages, int count = -1) const;
+	MTPMessageMedia pollMedia(const QJsonObject &poll, const QString &messageId) const;
+	MTPChat nativeChat(const QJsonObject &profile);
+	MTPChatFull fullChat(PeerId peer, const QJsonObject &profile);
+	void chatAction(mtpRequestId id, PeerId peer, QString action, QJsonObject extra = {}, bool booleanReply = false);
 	bool mediaRequest(mtpRequestId id, const mtpBuffer &body);
 	bool featureRequest(mtpRequestId id, const mtpBuffer &body);
 	void api(mtpRequestId id, const QString &path, const QJsonObject &body,
 		std::function<void(QJsonObject)> done, bool post = false,
-		std::function<void(QString)> failed = {});
+		std::function<void(QString)> failed = {}, bool keepPending = false, QHttpMultiPart *multipart = nullptr);
 	[[nodiscard]] MTPPeerNotifySettings notify(PeerId peer = PeerId(), QString category = {}) const;
 	[[nodiscard]] MTPUpdates updates(const QVector<MTPUpdate> &items) const;
-	void upload(mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done);
+	void upload(mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done, QString path = "/upload/file", QString chatId = {});
 	bool send(mtpRequestId id, PeerId peer, QJsonObject content, uint64 randomId,
 		const MTPInputReplyTo &replyTo = MTPInputReplyTo(), bool hasReply = false);
 	[[nodiscard]] QJsonObject mediaFile(const MTPInputMedia &media) const;

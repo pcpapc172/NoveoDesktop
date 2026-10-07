@@ -55,10 +55,18 @@ int main(int argc, char **argv) {
 			client.restore(saved);
 			return;
 		}
-		app.exit((scenario == "success" || scenario == "fragment" || scenario == "proxy" || successes == 2) ? 0 : 13);
+		app.exit((scenario == "totp" || scenario == "totp_retry" || scenario == "success" || scenario == "fragment" || scenario == "proxy" || successes == 2) ? 0 : 13);
+	};
+	if (scenario.startsWith("totp")) client.onTotpRequired = [&] {
+		if (client.submitTotp("12345") || client.submitTotp("12ab56")) { app.exit(20); return; }
+		if (!client.submitTotp(scenario == "totp_retry" ? "000000" : "123456")) app.exit(21);
 	};
 	client.onError = [&](Noveo::AuthClient::Error error) {
 		using E = Noveo::AuthClient::Error;
+		if (scenario == "totp_retry" && error == E::Credentials) {
+			if (!client.submitTotp("123456")) app.exit(22);
+			return;
+		}
 		const auto expected = scenario == "invalid" ? E::Credentials
 			: scenario == "rate" ? E::RateLimited
 			: scenario == "malformed" ? E::Protocol
