@@ -290,7 +290,7 @@ jobs:
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
 
-          cmake --build ..\out --config Debug --parallel
+          cmake --build ..\out --config Debug --parallel -- -k 0
 
       - name: Record build inputs.
         id: inputs

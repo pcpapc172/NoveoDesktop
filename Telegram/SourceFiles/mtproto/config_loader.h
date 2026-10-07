@@ -35,6 +35,7 @@ public:
 private:
 	mtpRequestId sendRequest(ShiftedDcId shiftedDcId);
 	void terminateRequest();
+	void enumerate();
 
 	not_null<Instance*> _instance;
 	base::Timer _enumDCTimer;
