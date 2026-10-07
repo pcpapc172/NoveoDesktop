@@ -550,7 +550,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		const auto chat = _chatIds.value(inputPeer(r.peer).value); const auto uuid = _rawMessages.value(r.msg_id.v);
 		if (chat.isEmpty() || uuid.isEmpty()) return bad("NOVEO_MESSAGE_UNKNOWN");
 		auto choices = QJsonArray();
-		for (const auto option : r.options.v) choices.push_back(QString::fromUtf8(option.v));
+		for (const auto &option : r.options.v) choices.push_back(QString::fromUtf8(option.v));
 		wire(id, {{{"type", "vote_poll"}, {"chatId", chat}, {"messageId", uuid}, {"optionIds", choices}, {"retract", choices.isEmpty()}}}, {"message_updated"}, emptyUpdates);
 		return true;
 	}
@@ -784,7 +784,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		if (!parsed) return bad();
 		const auto &r = *parsed;
 		auto blocked = QVector<MTPPeerBlocked>();
-		for (const auto raw : _blocked) blocked.push_back(MTP_peerBlocked(MTP_peerUser(MTP_long(NativeUserId(raw).bare)), MTP_int(0)));
+		for (const auto &raw : _blocked) blocked.push_back(MTP_peerBlocked(MTP_peerUser(MTP_long(NativeUserId(raw).bare)), MTP_int(0)));
 		const auto total = blocked.size(); blocked = blocked.mid(std::max(0, r.offset.v), std::max(0, r.limit.v));
 		_pending.remove(id); reply(id, MTPcontacts_Blocked(MTP_contacts_blockedSlice(MTP_int(total), MTP_vector<MTPPeerBlocked>(blocked), MTP_vector<MTPChat>({}), MTP_vector<MTPUser>(_users.values().toVector()))));
 		return true;
@@ -827,7 +827,6 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		if (!_auth->authenticated()) return true;
 		const auto parsed = ReadRequest<mtpc_account_getAuthorizations>(body);
 		if (!parsed) return bad();
-		const auto &r = *parsed;
 		api(id, "/user/sessions", {}, [=, this](QJsonObject response) {
 			auto authorizations = QVector<MTPAuthorization>(); _sessionIds.clear();
 			for (const auto value : response.value("sessions").toArray()) {
@@ -883,7 +882,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		const auto parsed = ReadRequest<mtpc_messages_createChat>(body);
 		if (!parsed) return bad();
 		const auto &r = *parsed;
-		auto members = QJsonArray(); for (const auto u : r.users.v) { const auto raw = _rawUsers.value(userId(u)); if (raw.isEmpty()) return bad("NOVEO_PEER_UNKNOWN"); members.push_back(raw); }
+		auto members = QJsonArray(); for (const auto &u : r.users.v) { const auto raw = _rawUsers.value(userId(u)); if (raw.isEmpty()) return bad("NOVEO_PEER_UNKNOWN"); members.push_back(raw); }
 		api(id, "/create_group", {{"name", String(r.title)}, {"members", members}}, [=, this](QJsonObject response) {
 			const auto profile = response.value("group").toObject();
 			if (profile.value("chatId").toString().isEmpty()) { fail(id, "NOVEO_CHAT_CREATE_FAILED"); return; }
@@ -936,7 +935,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		const auto parsed = ReadRequest<mtpc_channels_inviteToChannel>(body);
 		if (!parsed) return bad();
 		const auto &r = *parsed;
-		auto members = QJsonArray(); for (const auto u : r.users.v) { const auto raw = _rawUsers.value(userId(u)); if (raw.isEmpty()) return bad("NOVEO_PEER_UNKNOWN"); members.push_back(raw); }
+		auto members = QJsonArray(); for (const auto &u : r.users.v) { const auto raw = _rawUsers.value(userId(u)); if (raw.isEmpty()) return bad("NOVEO_PEER_UNKNOWN"); members.push_back(raw); }
 		const auto peer = channelPeer(r.channel);
 		api(id, "/chat/settings", {{"action", "add_members"}, {"chatId", _chatIds.value(peer.value)}, {"memberIds", members}}, [=, this](QJsonObject) {
 			_auth->send({{"type", "resync_state"}}); reply(id, MTPmessages_InvitedUsers(MTP_messages_invitedUsers(updates({}), MTPVector<MTPMissingInvitee>())));
@@ -1130,7 +1129,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		const auto multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 		const auto title = String(r->title);
 		const auto handle = "@channel_" + QUuid::createUuid().toString(QUuid::Id128).left(16);
-		for (const auto pair : {qMakePair(QString("name"), title), qMakePair(QString("handle"), handle)}) {
+		for (const auto &pair : {qMakePair(QString("name"), title), qMakePair(QString("handle"), handle)}) {
 			QHttpPart part;
 			part.setHeader(QNetworkRequest::ContentDispositionHeader, "form-data; name=\"" + pair.first + "\"");
 			part.setBody(pair.second.toUtf8()); multipart->append(part);

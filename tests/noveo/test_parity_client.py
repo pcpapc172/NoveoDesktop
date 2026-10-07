@@ -25,7 +25,9 @@ async def main():
                     ROOT / "Telegram/ThirdParty/range-v3/include"]
         flags = subprocess.check_output(["pkg-config", "--cflags", "--libs", "Qt6Core", "Qt6Network", "Qt6Gui"], text=True).split()
         binary = tmp / "probe"
-        subprocess.run(["g++", "-std=c++20", "-fPIC", "-O0", "-ffunction-sections", "-fdata-sections",
+        subprocess.run(["g++", "-std=c++20", "-fPIC", "-O0", "-Wall", "-Wextra", "-Werror",
+                        "-Wno-unused-parameter", "-Wno-sign-compare", "-Wno-missing-field-initializers",
+                        "-Wno-deprecated-declarations", "-ffunction-sections", "-fdata-sections",
                         *("-I" + str(path) for path in includes),
                         str(ROOT / "tests/noveo/parity_client_probe.cpp"),
                         str(ROOT / "Telegram/SourceFiles/noveo/session_client.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/session_actions.cpp"),
