@@ -76,7 +76,6 @@ public:
 		bool supportsShare = false;
 		bool supportsCalls = false;
 		bool web = false;
-		bool canOpenBrowser = false;
 		ItemState state = ItemState::Checking;
 
 	};

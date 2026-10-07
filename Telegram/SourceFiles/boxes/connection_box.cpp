@@ -502,7 +502,6 @@ public:
 	rpl::producer<> editClicks() const;
 	rpl::producer<> shareClicks() const;
 	rpl::producer<> showQrClicks() const;
-	rpl::producer<> openBrowserClicks() const;
 
 protected:
 	int resizeGetHeight(int newWidth) override;
@@ -525,7 +524,6 @@ private:
 	rpl::event_stream<> _editClicks;
 	rpl::event_stream<> _shareClicks;
 	rpl::event_stream<> _showQrClicks;
-	rpl::event_stream<> _openBrowserClicks;
 	base::unique_qptr<Ui::DropdownMenu> _menu;
 
 	bool _set = false;
@@ -656,10 +654,6 @@ rpl::producer<> ProxyRow::shareClicks() const {
 
 rpl::producer<> ProxyRow::showQrClicks() const {
 	return _showQrClicks.events();
-}
-
-rpl::producer<> ProxyRow::openBrowserClicks() const {
-	return _openBrowserClicks.events();
 }
 
 void ProxyRow::setupControls(View &&view) {
@@ -910,11 +904,6 @@ void ProxyRow::showMenu() {
 	addAction(tr::lng_proxy_menu_edit(tr::now), [=] {
 		_editClicks.fire({});
 	}, &st::menuIconEdit);
-	if (_view.canOpenBrowser) {
-		addAction(tr::lng_proxy_web_open(tr::now), [=] {
-			_openBrowserClicks.fire({});
-		}, &st::menuIconLink);
-	}
 	if (_view.supportsShare) {
 		addAction(tr::lng_proxy_edit_share(tr::now), [=] {
 			_shareClicks.fire({});
@@ -2299,12 +2288,6 @@ void ProxiesBoxController::updateView(const Item &item) {
 		!deleted && supportsShare,
 		supportsCalls,
 		item.data.type == Type::Web,
-		!deleted
-			&& selected
-			&& _settings.isEnabled()
-			&& item.data.type == Type::Web
-			&& (state == ItemState::WaitingForBrowser
-				|| state == ItemState::Unavailable),
 		state,
 	});
 }
