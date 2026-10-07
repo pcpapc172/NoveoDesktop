@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/fields/password_input.h"
 #include "platform/platform_webauthn.h"
 #include "settings/settings_builder.h"
+#include "settings/cloud_password/settings_cloud_password_common.h"
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
 #include "settings/cloud_password/settings_cloud_password_start.h"
@@ -1174,9 +1175,21 @@ void BuildNoveoSecurity(SectionBuilder &builder) {
 		.onClick = [=] {
 			controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 				box->setTitle(tr::lng_noveo_change_password());
-				const auto current = box->addRow(object_ptr<Ui::PasswordInput>(box, st::defaultInputField, tr::lng_noveo_current_password()));
-				const auto password = box->addRow(object_ptr<Ui::PasswordInput>(box, st::defaultInputField, tr::lng_noveo_new_password()));
-				const auto confirm = box->addRow(object_ptr<Ui::PasswordInput>(box, st::defaultInputField, tr::lng_cloud_password_confirm_new()));
+				const auto current = CloudPassword::AddPasswordField(
+					box->verticalLayout(),
+					tr::lng_noveo_current_password(),
+					QString(),
+					st::defaultInputField);
+				const auto password = CloudPassword::AddPasswordField(
+					box->verticalLayout(),
+					tr::lng_noveo_new_password(),
+					QString(),
+					st::defaultInputField);
+				const auto confirm = CloudPassword::AddPasswordField(
+					box->verticalLayout(),
+					tr::lng_cloud_password_confirm_new(),
+					QString(),
+					st::defaultInputField);
 				const auto busy = box->lifetime().make_state<bool>(false);
 				box->addButton(tr::lng_settings_save(), [=] {
 					if (*busy) return;
