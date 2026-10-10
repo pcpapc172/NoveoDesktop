@@ -92,7 +92,7 @@ jobs:
           nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
 
       - name: Install registry client.
-        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6
+        uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4
         with:
           url: https://github.com/oras-project/oras/releases/download/v1.3.4/oras_1.3.4_windows_amd64.zip
           checksum: ffdb6aa40267686b5d507da1f21a57fc502a9a7c86b90c54557d335644c99dbd
