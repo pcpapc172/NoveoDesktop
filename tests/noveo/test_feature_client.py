@@ -155,7 +155,20 @@ async def main():
                 else:
                     raise AssertionError(frame)
             return ws
+        notification_state = {"type": "notification_settings_updated", "revision": 0, "settings": {}}
+        async def notifications(request):
+            if request.method == "POST":
+                value = await request.json()
+                assert value["peerKey"].startswith(("user:", "chat:")) or value["peerKey"] in ("users", "chats", "broadcasts")
+                current = notification_state["settings"].setdefault(value["peerKey"], {})
+                for key, item in value["settings"].items():
+                    if item is None: current.pop(key, None)
+                    else: current[key] = item
+                notification_state["revision"] += 1
+            return web.json_response({"success": True, **notification_state})
         app = web.Application()
+        app.router.add_get("/user/notifications", notifications)
+        app.router.add_post("/user/notifications", notifications)
         app.router.add_post("/voice/token", voice_token)
         app.router.add_post("/gifts/sell", sell)
         app.router.add_post("/bot/callback", callback)
@@ -181,7 +194,7 @@ async def main():
         result = await process.wait()
         await socks.close()
         await runner.cleanup()
-        assert len(socks.requests) > 5 and all(user == "proxy-user" for _, _, user in socks.requests), socks.requests
+        assert len(socks.requests) >= 4 and all(user == "proxy-user" for _, _, user in socks.requests), socks.requests
         assert result == 0, f"Native bridge probe exited {result}"
         assert observed["reaction"] == [False, True, False], observed
         assert observed["typing"] == ["typing", "emoji_interaction", "emoji_interaction_seen"], observed

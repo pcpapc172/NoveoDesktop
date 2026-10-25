@@ -90,7 +90,20 @@ async def main():
                 else:
                     raise AssertionError(frame["type"])
             return ws
+        notification_state = {"type": "notification_settings_updated", "revision": 0, "settings": {}}
+        async def notifications(request):
+            if request.method == "POST":
+                value = await request.json()
+                assert value["peerKey"].startswith(("user:", "chat:")) or value["peerKey"] in ("users", "chats", "broadcasts")
+                current = notification_state["settings"].setdefault(value["peerKey"], {})
+                for key, item in value["settings"].items():
+                    if item is None: current.pop(key, None)
+                    else: current[key] = item
+                notification_state["revision"] += 1
+            return web.json_response({"success": True, **notification_state})
         app = web.Application()
+        app.router.add_get("/user/notifications", notifications)
+        app.router.add_post("/user/notifications", notifications)
         app.router.add_get("/ws", websocket)
         app.router.add_get("/user/contacts", contacts)
         app.router.add_get("/user/profile", profile)

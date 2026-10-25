@@ -122,6 +122,11 @@ private:
 		std::function<void(QJsonObject)> done, bool post = false,
 		std::function<void(QString)> failed = {}, bool keepPending = false, QHttpMultiPart *multipart = nullptr);
 	[[nodiscard]] MTPPeerNotifySettings notify(PeerId peer = PeerId(), QString category = {}) const;
+	QString notificationKey(PeerId peer, QString category = {}) const;
+	void applyNotifications(const QJsonObject &frame);
+	QJsonObject _notificationSettings;
+	qint64 _notificationRevision = -1;
+	bool _notificationReady = false;
 	[[nodiscard]] MTPUpdates updates(const QVector<MTPUpdate> &items) const;
 	void upload(mtpRequestId id, const MTPInputMedia &media, std::function<void(QJsonObject)> done, QString path = "/upload/file", QString chatId = {});
 	bool send(mtpRequestId id, PeerId peer, QJsonObject content, uint64 randomId,

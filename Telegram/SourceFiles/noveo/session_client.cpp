@@ -495,6 +495,9 @@ void SessionClient::authenticated(const QJsonObject &profile) {
 	_auth->send({{"type", "resync_state"}});
 	contacts();
 	gifts();
+	api(--_internalRequest, "/user/notifications", {}, [this](QJsonObject frame) {
+		applyNotifications(frame);
+	});
 	drain();
 	avatars();
 }
@@ -567,6 +570,9 @@ void SessionClient::reset() {
 	_sessionIds.clear();
 	_pins.clear();
 	_self.clear();
+	_notificationSettings = {};
+	_notificationRevision = -1;
+	_notificationReady = false;
 	_historyReady = _contactsReady = false;
 }
 
@@ -1175,6 +1181,10 @@ void SessionClient::history(const QJsonArray &chats) {
 }
 
 void SessionClient::message(const QJsonObject &frame) {
+	if (frame.value("type") == "notification_settings_updated") {
+		applyNotifications(frame);
+		return;
+	}
 	if (frame.value("type") == "message_context") {
 		cacheMessages(_chatPeers.value(frame.value("chatId").toString()), frame.value("messages").toArray());
 	}
@@ -2007,7 +2017,49 @@ MTPUpdates SessionClient::updates(const QVector<MTPUpdate> &items) const {
 		MTP_int(int(QDateTime::currentSecsSinceEpoch())), MTP_int(0));
 }
 
+QString SessionClient::notificationKey(PeerId peer, QString category) const {
+	if (!category.isEmpty()) return category;
+	const auto raw = peerIsUser(peer) ? _rawUsers.value(peer.value) : _chatIds.value(peer.value);
+	return raw.isEmpty() ? QString() : (peerIsUser(peer) ? "user:" : "chat:") + raw;
+}
+
+void SessionClient::applyNotifications(const QJsonObject &frame) {
+	const auto revision = frame.value("revision").toVariant().toLongLong();
+	if (!frame.value("settings").isObject() || revision < _notificationRevision) return;
+	_notificationRevision = revision;
+	_notificationSettings = frame.value("settings").toObject();
+	_notificationReady = true;
+	if (!_historyReady) return;
+	auto changes = QVector<MTPUpdate>();
+	for (const auto &category : {QString("users"), QString("chats"), QString("broadcasts")}) {
+		const auto peer = category == "users" ? MTPNotifyPeer(MTP_notifyUsers())
+			: category == "chats" ? MTPNotifyPeer(MTP_notifyChats()) : MTPNotifyPeer(MTP_notifyBroadcasts());
+		changes.push_back(MTP_updateNotifySettings(peer, notify({}, category)));
+	}
+	for (const auto key : _dialogs.keys()) {
+		const auto peer = PeerId(key);
+		refreshDialog(peer);
+		changes.push_back(MTP_updateNotifySettings(MTP_notifyPeer(peerToMTP(peer)), notify(peer)));
+	}
+	if (onUpdate) onUpdate(updates(changes));
+	if (onDialogs) onDialogs(dialogs());
+}
+
 MTPPeerNotifySettings SessionClient::notify(PeerId peer, QString category) const {
+	if (_notificationReady) {
+		auto values = _notificationSettings.value(notificationKey(peer, category)).toObject();
+		if (peer && values.isEmpty()) return notify({}, peerIsUser(peer) ? "users" : peerIsChat(peer) ? "chats" : "broadcasts");
+		if (values.isEmpty()) return Notify();
+		auto flags = MTPDpeerNotifySettings::Flags();
+		if (values.contains("muteUntil")) flags |= MTPDpeerNotifySettings::Flag::f_mute_until;
+		if (values.contains("showPreviews")) flags |= MTPDpeerNotifySettings::Flag::f_show_previews;
+		if (values.contains("silent")) flags |= MTPDpeerNotifySettings::Flag::f_silent;
+		return MTP_peerNotifySettings(MTP_flags(flags),
+			values.value("showPreviews").toBool(true) ? MTPBool(MTP_boolTrue()) : MTPBool(MTP_boolFalse()),
+			values.value("silent").toBool() ? MTPBool(MTP_boolTrue()) : MTPBool(MTP_boolFalse()),
+			MTP_int(values.value("muteUntil").toInt()), MTPNotificationSound(), MTPNotificationSound(), MTPNotificationSound(),
+			MTPBool(), MTPBool(), MTPNotificationSound(), MTPNotificationSound(), MTPNotificationSound());
+	}
 	const auto key = "notifications/" + _self + "/"
 		+ (category.isEmpty() ? QString::number(peer.value) : category);
 	const auto saved = QSettings("Noveo", "Desktop").value(key).toByteArray();
@@ -2446,20 +2498,16 @@ bool SessionClient::featureRequest(mtpRequestId id, const mtpBuffer &body) {
 		auto settings = MTPInputPeerNotifySettings();
 		if (!settings.read(from, end)) return bad();
 		const auto &data = settings.c_inputPeerNotifySettings();
-		const auto savedSettings = notify(peer, category);
-		const auto &previous = savedSettings.c_peerNotifySettings();
-		const auto result = MTPPeerNotifySettings(MTP_peerNotifySettings(
-			MTP_flags(MTPDpeerNotifySettings::Flag::f_show_previews | MTPDpeerNotifySettings::Flag::f_silent | MTPDpeerNotifySettings::Flag::f_mute_until),
-			data.vshow_previews() ? *data.vshow_previews() : *previous.vshow_previews(),
-			data.vsilent() ? *data.vsilent() : *previous.vsilent(),
-			data.vmute_until() ? *data.vmute_until() : *previous.vmute_until(),
-			MTPNotificationSound(), MTPNotificationSound(), MTPNotificationSound(), MTPBool(), MTPBool(),
-			MTPNotificationSound(), MTPNotificationSound(), MTPNotificationSound()));
-		mtpBuffer buffer; result.write(buffer);
-		QSettings("Noveo", "Desktop").setValue("notifications/" + _self + "/" + (category.isEmpty() ? QString::number(peer.value) : category),
-			QByteArray(reinterpret_cast<const char*>(buffer.constData()), buffer.size() * 4));
-		_pending.remove(id); reply(id, MTPBool(MTP_boolTrue()));
-		if (peer) refreshDialog(peer);
+		const auto key = notificationKey(peer, category);
+		if (key.isEmpty()) return bad();
+		auto values = QJsonObject();
+		values.insert("muteUntil", data.vmute_until() ? QJsonValue(data.vmute_until()->v) : QJsonValue(QJsonValue::Null));
+		if (data.vshow_previews()) values.insert("showPreviews", data.vshow_previews()->type() == mtpc_boolTrue);
+		if (data.vsilent()) values.insert("silent", data.vsilent()->type() == mtpc_boolTrue);
+		api(id, "/user/notifications", {{"peerKey", key}, {"settings", values}}, [=, this](QJsonObject frame) {
+			applyNotifications(frame);
+			reply(id, MTPBool(MTP_boolTrue()));
+		}, true);
 	}
 	return true;
 }
