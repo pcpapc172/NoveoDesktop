@@ -196,6 +196,15 @@ void SessionClient::cacheMessages(PeerId peer, const QJsonArray &objects) {
 		});
 		if (i == messages.end()) messages.push_back(native); else *i = native;
 	}
+	std::sort(_messages[peer.value].begin(), _messages[peer.value].end(),
+		[](const MTPMessage &a, const MTPMessage &b) {
+			const auto id = [](const MTPMessage &message) {
+				return message.type() == mtpc_message
+					? message.c_message().vid().v
+					: message.c_messageService().vid().v;
+			};
+			return id(a) < id(b);
+		});
 	// Repair references in cached children after a context/search page loads parents.
 	for (auto &native : _messages[peer.value]) {
 		const auto id = native.type() == mtpc_message ? native.c_message().vid().v : native.type() == mtpc_messageService ? native.c_messageService().vid().v : 0;

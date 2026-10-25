@@ -73,7 +73,13 @@ int main(int argc, char **argv) {
 			request(3, MTPmessages_GetMessages(MTP_vector<MTPInputMessage>({MTP_inputMessageID(MTP_int(parentId))})));
 		} else if (id == 3) {
 			const auto result = Decode<MTPmessages_Messages>(body);
-			Assert(qs(result.c_messages_messages().vmessages().v.front().c_message().vmessage()) == "unloaded parent"); edit(4, "edited");
+			Assert(qs(result.c_messages_messages().vmessages().v.front().c_message().vmessage()) == "unloaded parent"); history(103);
+		} else if (id == 103) {
+			const auto result = Decode<MTPmessages_Messages>(body);
+			const auto &messages = result.c_messages_messagesSlice().vmessages().v;
+			Assert(qs(messages.front().c_message().vmessage()) == "reply");
+			Assert(qs(messages.back().c_message().vmessage()) == "unloaded parent");
+			edit(4, "edited");
 		} else if (id == 4) {
 			Decode<MTPUpdates>(body); QTimer::singleShot(20, &app, [&] { history(5); });
 		} else if (id == 5 || id == 7) {
