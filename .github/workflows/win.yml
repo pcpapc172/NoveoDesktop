@@ -292,20 +292,6 @@ jobs:
 
           cmake --build ..\out --config Debug --parallel -- -k 0
 
-      - name: Record build inputs.
-        id: inputs
-        if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
-        run: |
-          cd %TBUILD%\%REPO_NAME%
-          python .github\scripts\build_cache.py save
-          sccache --show-stats
-
-      - name: Publish incremental build, including objects after a failure.
-        if: ${{ !cancelled() && steps.inputs.outcome == 'success' && github.ref == 'refs/heads/main' && (steps.inputs.outputs.changed == 'true' || steps.registry-build.outputs.available != 'true') }}
-        run: |
-          cd %TBUILD%\%REPO_NAME%
-          python .github\scripts\registry_cache.py push --reference %REGISTRY_CACHE%:out-%BUILD_SNAPSHOT_KEY% --key %BUILD_SNAPSHOT_KEY% --root "%TBUILD%\%REPO_NAME%" --paths out
-
       - name: Stage Windows binaries.
         if: env.ONLY_CACHE == 'false' && ((env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly'))
         shell: pwsh
@@ -330,3 +316,17 @@ jobs:
           compression-level: 1
           retention-days: 14
           if-no-files-found: error
+
+      - name: Record build inputs.
+        id: inputs
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+        run: |
+          cd %TBUILD%\%REPO_NAME%
+          python .github\scripts\build_cache.py save
+          sccache --show-stats
+
+      - name: Publish incremental build, including objects after a failure.
+        if: ${{ !cancelled() && steps.inputs.outcome == 'success' && github.ref == 'refs/heads/main' && (steps.inputs.outputs.changed == 'true' || steps.registry-build.outputs.available != 'true') }}
+        run: |
+          cd %TBUILD%\%REPO_NAME%
+          python .github\scripts\registry_cache.py push --reference %REGISTRY_CACHE%:out-%BUILD_SNAPSHOT_KEY% --key %BUILD_SNAPSHOT_KEY% --root "%TBUILD%\%REPO_NAME%" --paths out

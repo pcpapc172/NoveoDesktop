@@ -48,6 +48,7 @@ jobs:
           BUILD_ENV_HASH: ${{ hashFiles('Telegram/build/docker/centos_env/**') }}
         run: |
           echo "BUILD_ENV_KEY=$BUILD_ENV_HASH" >> "$GITHUB_ENV"
+          echo "REGISTRY_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-cache" >> "$GITHUB_ENV"
           echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-build:$BUILD_ENV_HASH" >> "$GITHUB_ENV"
 
       - name: Log in to build image registry.
@@ -158,8 +159,28 @@ jobs:
           docker push "$REGISTRY_IMAGE"
           echo "Build environment published: $REGISTRY_IMAGE" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Restore incremental build.
+      - name: Install registry client.
         if: env.ONLY_CACHE == 'false'
+        uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6
+        with:
+          version: 1.3.0
+
+      - name: Registry snapshot login.
+        if: env.ONLY_CACHE == 'false'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | oras login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      - name: Restore registry incremental build.
+        id: registry-build
+        if: env.ONLY_CACHE == 'false'
+        run: >-
+          python3 .github/scripts/registry_cache.py pull
+          --reference "$REGISTRY_CACHE:out-v1-$BUILD_ENV_KEY"
+          --key "$BUILD_ENV_KEY" --root "$PWD" --paths out --compression zstd
+
+      - name: Restore incremental build.
+        if: env.ONLY_CACHE == 'false' && steps.registry-build.outputs.available != 'true'
         id: cache-build
         uses: actions/cache/restore@v6
         with:
@@ -181,6 +202,7 @@ jobs:
           restore-keys: ${{ runner.OS }}-tdesktop-${{ matrix.defines || 'null' }}-
 
       - name: Telegram Desktop build.
+        id: build
         if: env.ONLY_CACHE == 'false'
         run: |
           DEFINE=""
@@ -214,37 +236,6 @@ jobs:
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF \
           $DEFINE
 
-      - name: Count ccache misses.
-        id: ccache-stats
-        if: env.ONLY_CACHE == 'false'
-        run: |
-          MISSES=$(docker run --rm -u "$(id -u)" -v "$CCACHE_DIR:/var/cache/ccache" "$IMAGE_TAG" ccache --print-stats | sed -n 's/^cache_miss\t//p' | head -1)
-          case "$MISSES" in (*[!0-9]*|'') MISSES=0;; esac
-          echo "misses=$MISSES" >> $GITHUB_OUTPUT
-          echo "ccache misses this run: $MISSES"
-
-      - name: Save Telegram Desktop cache.
-        if: >
-          env.ONLY_CACHE == 'false'
-            && github.ref_name == github.event.repository.default_branch
-            && fromJSON(steps.ccache-stats.outputs.misses) > 0
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ steps.cache-tdesktop.outputs.cache-primary-key }}
-
-      - name: Record build inputs.
-        id: inputs
-        if: success() && env.ONLY_CACHE == 'false'
-        run: python3 .github/scripts/build_cache.py save
-
-      - name: Save incremental build.
-        if: steps.inputs.outputs.changed == 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: out
-          key: ${{ steps.cache-build.outputs.cache-primary-key }}
-
       - name: Check.
         if: env.ONLY_CACHE == 'false'
         run: |
@@ -263,28 +254,62 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           cd out/Debug
-          mkdir -p artifact
-          cp {Telegram,Updater} artifact/
+          mkdir -p "$RUNNER_TEMP/noveo-linux-artifact"
+          cp {Telegram,Updater} "$RUNNER_TEMP/noveo-linux-artifact/"
 
       - name: Strip packaged Linux binaries.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           docker run --rm -u "$(id -u)" \
-            -v "$PWD:/usr/src/tdesktop" "$IMAGE_TAG" \
+            -v "$RUNNER_TEMP/noveo-linux-artifact:/artifact" "$IMAGE_TAG" \
             strip --strip-all \
             --remove-section=.comment \
             --remove-section=.GCC.command.line \
             --remove-section=.note.gnu.gold-version \
-            /usr/src/tdesktop/out/Debug/artifact/Telegram \
-            /usr/src/tdesktop/out/Debug/artifact/Updater
-          ls -lh out/Debug/artifact/{Telegram,Updater}
+            /artifact/Telegram \
+            /artifact/Updater
+          ls -lh "$RUNNER_TEMP/noveo-linux-artifact/"{Telegram,Updater}
 
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: out/Debug/artifact/
+          path: ${{ runner.temp }}/noveo-linux-artifact/
           compression-level: 1
           retention-days: 14
           if-no-files-found: error
+
+      - name: Record build inputs, including partial builds.
+        id: inputs
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+        run: python3 .github/scripts/build_cache.py save
+
+      - name: Publish incremental build, including objects after a failure.
+        if: >-
+          !cancelled() && steps.inputs.outcome == 'success'
+          && github.ref_name == github.event.repository.default_branch
+          && (steps.inputs.outputs.changed == 'true' || steps.registry-build.outputs.available != 'true')
+        run: >-
+          python3 .github/scripts/registry_cache.py push
+          --reference "$REGISTRY_CACHE:out-v1-$BUILD_ENV_KEY"
+          --key "$BUILD_ENV_KEY" --root "$PWD" --paths out --compression zstd
+
+      - name: Compiler cache statistics.
+        id: ccache-stats
+        if: ${{ !cancelled() && (steps.build.outcome == 'success' || steps.build.outcome == 'failure') }}
+        run: |
+          docker run --rm -u "$(id -u)" -v "$CCACHE_DIR:/var/cache/ccache" "$IMAGE_TAG" ccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+          MISSES=$(docker run --rm -u "$(id -u)" -v "$CCACHE_DIR:/var/cache/ccache" "$IMAGE_TAG" ccache --print-stats | sed -n 's/^cache_miss\t//p' | head -1)
+          case "$MISSES" in (*[!0-9]*|'') MISSES=0;; esac
+          echo "misses=$MISSES" >> "$GITHUB_OUTPUT"
+
+      - name: Save Telegram Desktop cache.
+        if: >-
+          !cancelled() && steps.ccache-stats.outcome == 'success'
+          && github.ref_name == github.event.repository.default_branch
+          && fromJSON(steps.ccache-stats.outputs.misses) > 0
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.cache-tdesktop.outputs.cache-primary-key }}

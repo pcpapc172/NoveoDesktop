@@ -17,6 +17,13 @@ spec.loader.exec_module(cache)
 
 class RegistryCacheTest(unittest.TestCase):
     def test_snapshot_round_trip_preserves_incremental_build(self):
+        self.snapshot_round_trip('gzip')
+
+    @unittest.skipUnless(shutil.which('zstd'), 'zstd is not installed')
+    def test_zstd_snapshot_preserves_incremental_build(self):
+        self.snapshot_round_trip('zstd')
+
+    def snapshot_round_trip(self, compression):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build = root / 'out'
@@ -33,16 +40,16 @@ class RegistryCacheTest(unittest.TestCase):
                 if command[:2] == ['oras', 'resolve']:
                     return subprocess.CompletedProcess(command, 0, 'sha256:' + 'a' * 64, '')
                 if command[:2] == ['oras', 'push']:
-                    for name in ['snapshot.json', 'snapshot.tar.gz']:
+                    for name in ['snapshot.json', 'snapshot.tar.zst' if compression == 'zstd' else 'snapshot.tar.gz']:
                         shutil.copyfile(Path(kwargs['cwd']) / name, stored / name)
                 elif command[:2] == ['oras', 'pull']:
-                    for name in ['snapshot.json', 'snapshot.tar.gz']:
+                    for name in ['snapshot.json', 'snapshot.tar.zst' if compression == 'zstd' else 'snapshot.tar.gz']:
                         shutil.copyfile(stored / name, Path(command[-1]) / name)
                 else:
                     return original_run(command, **kwargs)
                 return subprocess.CompletedProcess(command, 0)
 
-            args = ['cache', 'push', '--reference', 'ghcr.io/example/cache:out-test', '--key', 'test', '--root', str(root), '--paths', 'out']
+            args = ['cache', 'push', '--reference', 'ghcr.io/example/cache:out-test', '--key', 'test', '--root', str(root), '--paths', 'out', '--compression', compression]
             with patch.object(cache.subprocess, 'run', side_effect=registry), patch.dict(os.environ, {'GITHUB_REPOSITORY': 'example/repo'}):
                 with patch('sys.argv', args):
                     cache.main()
@@ -60,6 +67,15 @@ class RegistryCacheTest(unittest.TestCase):
                 (stored / 'snapshot.json').write_text(json.dumps(metadata))
                 with patch('sys.argv', args), self.assertRaisesRegex(ValueError, 'identity'):
                     cache.main()
+
+    @unittest.skipUnless(shutil.which('zstd'), 'zstd is not installed')
+    def test_invalid_zstd_stream_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'broken.tar.zst'
+            path.write_bytes(b'not a compressed snapshot')
+            with self.assertRaises((tarfile.TarError, RuntimeError)):
+                with cache.open_archive(path, 'r', 'zstd') as archive:
+                    cache.validate(archive, ['out'])
 
     def test_dependency_links_are_archived_as_regular_files(self):
         with tempfile.TemporaryDirectory() as directory:
