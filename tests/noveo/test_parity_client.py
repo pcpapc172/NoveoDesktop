@@ -92,6 +92,9 @@ async def main():
             return web.json_response({"success": True, "profile": next(chat for chat in chats if chat["chatId"] == body["chatId"])})
         async def member_permissions(request):
             authorize(request)
+            if request.method == "GET" and request.query.get("chatId") == "member-group":
+                assert request.query.get("memberId") == "test-user"
+                return web.json_response({"success": True, "role": "member", "effectivePermissions": {"canSendMessages": False, "canSendFiles": True, "canAddMembers": True}})
             if request.method == "POST":
                 assert await request.json() == {"chatId": "group", "memberId": "other-user", "canSendMessages": False, "canSendFiles": False, "canAddMembers": None}; observed["member_save"] += 1
             return web.json_response({"success": True, "role": "member", "effectivePermissions": {"canSendMessages": True, "canSendFiles": True, "canAddMembers": True}})
