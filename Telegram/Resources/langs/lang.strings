@@ -8829,3 +8829,5 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_noveo_chat_permissions" = "Chat permissions";
 "lng_noveo_permission_view_members" = "View members";
+
+"lng_noveo_gift_issue_number" = "{number} of {amount}";

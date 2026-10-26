@@ -35,6 +35,7 @@ public:
 	void login(QString username, QString password);
 	bool submitTotp(QString code);
 	bool replaceToken(QString token, QString sessionId);
+	void saveSyncState(const QJsonObject &state);
 	void restore(const QJsonObject &authorization, bool connectNow = true);
 	void setProxy(const QNetworkProxy &proxy);
 	void networkAvailable(bool available);

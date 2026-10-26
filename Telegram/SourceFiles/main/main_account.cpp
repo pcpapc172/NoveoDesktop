@@ -7,6 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "main/main_account.h"
 
+#include "api/api_text_entities.h"
+#include "data/data_chat_filters.h"
+#include "data/data_drafts.h"
+#include "data/data_folder.h"
+#include "history/history.h"
+#include "ui/text/text_utilities.h"
 #include "noveo/auth_client.h"
 #include "calls/calls_instance.h"
 #include "noveo/session_client.h"
@@ -44,6 +50,74 @@ namespace {
 
 constexpr auto kWideIdsTag = ~uint64(0);
 constexpr auto kNoveoAuthorizationTag = quint32(0x4E4F5645);
+
+Noveo::SessionClient::LocalSyncState CaptureSyncState(
+	Session* session, const QVector<PeerId> &peers) {
+	auto result = Noveo::SessionClient::LocalSyncState();
+	if (!session) {
+		return result;
+	}
+	auto &data = session->data();
+	for (const auto folderId : {0, 1}) {
+		const auto folder = folderId ? data.folder(folderId).get() : nullptr;
+		auto rank = 1;
+		for (const auto &key : data.pinnedChatsOrder(folder)) {
+			if (const auto history = key.history()) {
+				result.dialogs[history->peer->id.value].insert(
+					"pinnedRank", rank++);
+			}
+		}
+	}
+	for (const auto peer : peers) {
+		const auto history = data.historyLoaded(peer);
+		if (!history) {
+			continue;
+		}
+		if (history->folder()) {
+			result.dialogs[peer.value].insert("archived", true);
+		}
+		if (history->unreadMark()) {
+			result.dialogs[peer.value].insert("unread", true);
+		}
+		const auto draft = history->localDraft(MsgId(), PeerId())
+							   ? history->localDraft(MsgId(), PeerId())
+							   : history->cloudDraft(MsgId(), PeerId());
+		if (!draft || draft->textWithTags.text.isEmpty()
+			|| draft->hasRichMessage() || draft->reply.messageId
+			|| draft->reply.topicRootId || draft->reply.monoforumPeerId
+			|| draft->suggest || !draft->webpage.url.isEmpty()) {
+			continue;
+		}
+		const auto entities = Api::EntitiesToMTP(
+			session,
+			TextUtilities::ConvertTextTagsToEntities(
+				draft->textWithTags.tags),
+			Api::ConvertOption::SkipLocal);
+		auto flags = MTPDdraftMessage::Flags();
+		if (!entities.v.isEmpty()) {
+			flags |= MTPDdraftMessage::Flag::f_entities;
+		}
+		if (draft->webpage.removed) {
+			flags |= MTPDdraftMessage::Flag::f_no_webpage;
+		}
+		result.drafts.insert(
+			peer.value,
+			MTP_draftMessage(
+				MTP_flags(flags),
+				MTPInputReplyTo(),
+				MTP_string(draft->textWithTags.text),
+				entities,
+				MTPInputMedia(),
+				MTP_int(draft->date),
+				MTPlong(),
+				MTPSuggestedPost(),
+				MTPRichMessage()));
+	}
+	for (const auto &filter : data.chatsFilters().list()) {
+		result.filters.push_back(filter.tl());
+	}
+	return result;
+}
 
 [[nodiscard]] QString ComposeDataString(const QString &dataName, int index) {
 	auto result = dataName;
@@ -490,6 +564,9 @@ void Account::prepareNoveoClient() {
 	_noveoApi = std::make_unique<Noveo::SessionClient>(_noveo.get());
 	_noveoApi->onVoiceEvent = [this](const QJsonObject &event) {
 		if (const auto session = maybeSession()) Core::App().calls().handleNoveoEvent(session, event);
+	};
+	_noveoApi->onLocalSyncState = [this](const QVector<PeerId> &peers) {
+		return CaptureSyncState(maybeSession(), peers);
 	};
 	_noveoApi->onReply = [this](mtpRequestId id, mtpBuffer buffer) {
 		if (!_mtp) return;

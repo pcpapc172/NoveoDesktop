@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "noveo/auth_client.h"
+#include "noveo/sync_state.h"
 #include "scheme.h"
 #include "data/data_peer_id.h"
 
@@ -60,14 +61,61 @@ public:
 		std::function<void(QString)> done);
 	[[nodiscard]] QJsonObject giftDetails(int messageId) const;
 	[[nodiscard]] QJsonObject giftInfo(uint64 id) const;
+	[[nodiscard]] QJsonObject savedGiftInfo(PeerId peer, uint64 id) const;
 	[[nodiscard]] MTPStarGift starGift(const QJsonObject &info) const;
 
+	struct LocalSyncState {
+		QVector<MTPDialogFilter> filters;
+		QMap<uint64, QJsonObject> dialogs;
+		QMap<uint64, MTPDraftMessage> drafts;
+	};
+	std::function<LocalSyncState(const QVector<PeerId> &)> onLocalSyncState;
 	std::function<void(mtpRequestId, mtpBuffer)> onReply;
 	std::function<void(const MTPUpdates &)> onUpdate;
 	std::function<void(const MTPmessages_Dialogs &)> onDialogs;
 	std::function<void(PeerId, const QUrl &)> onAvatar;
 
 private:
+	struct SyncWaiter {
+		mtpRequestId requestId = 0;
+		qint64 sequence = 0;
+	};
+	SyncState _sync;
+	QTimer _syncRetry;
+	QMap<QString, QVector<SyncWaiter>> _syncWriters;
+	QSet<mtpRequestId> _syncRequests;
+	QMap<mtpRequestId, int> _syncRemaining;
+	QMap<QString, QJsonValue> _syncAppliedDrafts;
+	QSet<QString> _syncReplyContexts;
+	int _syncGeneration = 0;
+	int _syncRetryDelay = 2000;
+	bool _syncReady = false;
+	bool _syncFetched = false;
+	bool _syncLoading = false;
+	bool _syncSaving = false;
+	bool _syncCaptured = false;
+	bool syncRequest(mtpRequestId id, const mtpBuffer &body);
+	void syncRefresh();
+	void syncAccept(const QJsonObject &frame);
+	void syncFlush();
+	void syncRetry();
+	void syncPersist();
+	void syncCaptureLocal();
+	void syncImportLocal();
+	void syncApply(const QSet<QString> &changed);
+	void syncQueue(QString kind, QString key, QJsonValue value, mtpRequestId id = 0);
+	void syncComplete(const QJsonObject &entry, QString error = {});
+	[[nodiscard]] QString syncKey(PeerId peer) const;
+	[[nodiscard]] PeerId syncPeer(const QString &key) const;
+	[[nodiscard]] QJsonValue syncValue(QString kind, QString key) const;
+	[[nodiscard]] QJsonObject syncFolder(const MTPDialogFilter &filter) const;
+	[[nodiscard]] MTPmessages_DialogFilters syncFilters() const;
+	[[nodiscard]] QJsonArray syncEntities(const QVector<MTPMessageEntity> &entities) const;
+	[[nodiscard]] QJsonValue syncDraft(QString text, bool noWebpage, const std::optional<MTPInputReplyTo> &reply, const QVector<MTPMessageEntity> &entities) const;
+	[[nodiscard]] std::optional<MTPDraftMessage> syncNativeDraft(const QString &key);
+	[[nodiscard]] MTPDialog syncDialog(PeerId peer, const MTPDialog &dialog);
+	[[nodiscard]] MTPmessages_PeerDialogs syncPinned(int folder) const;
+
 	struct Pending {
 		mtpBuffer body;
 		qint64 deadline = 0;
@@ -120,7 +168,7 @@ private:
 	bool featureRequest(mtpRequestId id, const mtpBuffer &body);
 	void api(mtpRequestId id, const QString &path, const QJsonObject &body,
 		std::function<void(QJsonObject)> done, bool post = false,
-		std::function<void(QString)> failed = {}, bool keepPending = false, QHttpMultiPart *multipart = nullptr);
+		std::function<void(QString)> failed = {}, bool keepPending = false, QHttpMultiPart *multipart = nullptr, bool syncConflict = false);
 	[[nodiscard]] MTPPeerNotifySettings notify(PeerId peer = PeerId(), QString category = {}) const;
 	QString notificationKey(PeerId peer, QString category = {}) const;
 	void applyNotifications(const QJsonObject &frame);
@@ -187,6 +235,7 @@ private:
 	QMap<mtpRequestId, int> _reactionRequests;
 	QVector<MTPContact> _contacts;
 	QMap<QString, QJsonObject> _gifts;
+	QMap<uint64, QMap<uint64, QJsonObject>> _savedGiftInfo;
 	QJsonArray _deferredChats;
 	bool _giftsLoading = false;
 	QJsonObject _voiceState;

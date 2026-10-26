@@ -331,7 +331,11 @@ void AuthClient::message(const QByteArray &payload) {
 		if (user.value("userId").toString().isEmpty() || token.isEmpty()) {
 			failed(Error::Protocol, true); return;
 		}
+		const auto saved = _authorization;
 		_authorization = { { "user", user }, { "token", token } };
+		if (saved.value("user").toObject().value("userId") == user.value("userId")) {
+			_authorization.insert("accountSync", saved.value("accountSync"));
+		}
 		_awaitingTotp = false;
 		_authenticated = true;
 		_timeout.stop();
@@ -352,6 +356,16 @@ void AuthClient::message(const QByteArray &payload) {
 		failed(Error::SessionExpired, true);
 	} else if (_authenticated && onMessage) {
 		onMessage(object);
+	}
+}
+
+void AuthClient::saveSyncState(const QJsonObject &state) {
+	if (_authorization.isEmpty() || _authorization.value("accountSync") == state) {
+		return;
+	}
+	_authorization.insert("accountSync", state);
+	if (onAuthorizationChanged) {
+		onAuthorizationChanged();
 	}
 }
 

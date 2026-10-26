@@ -80,6 +80,7 @@ struct GiftTypeStars {
 	Data::StarGift info;
 	PeerData *from = nullptr;
 	TimeId date = 0;
+	int issueNumber = 0;
 	bool pinnedSelection : 1 = false;
 	bool forceTon : 1 = false;
 	bool userpic : 1 = false;
@@ -87,6 +88,7 @@ struct GiftTypeStars {
 	bool hidden : 1 = false;
 	bool resale : 1 = false;
 	bool mine : 1 = false;
+	bool owned : 1 = false;
 
 	[[nodiscard]] friend inline bool operator==(
 		const GiftTypeStars&,

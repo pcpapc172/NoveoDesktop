@@ -186,6 +186,16 @@ int main(int argc, char **argv) {
 			const auto result = Decode<MTPpayments_SavedStarGifts>(body);
 			const auto &data = result.c_payments_savedStarGifts();
 			Assert(data.vcount().v == 2 && data.vgifts().v.size() == 1);
+			const auto &savedGift = data.vgifts().v.front().data();
+			Assert(savedGift.vmsg_id() && savedGift.vmsg_id()->v > 0);
+			Assert(savedGift.vgift_num() && savedGift.vgift_num()->v == 17);
+			const auto &gift = savedGift.vgift().c_starGift();
+			Assert(gift.is_limited() && !gift.is_sold_out());
+			Assert(gift.vavailability_total()->v == 100 && gift.vavailability_remains()->v == 25);
+			const auto instance = client.savedGiftInfo(peerFromUser(Noveo::NativeUserId("test-user")), savedGift.vmsg_id()->v);
+			Assert(instance.value("issueIndex") == 17);
+			auto exhausted = instance; exhausted.insert("stockRemaining", 0);
+			Assert(client.starGift(exhausted).c_starGift().is_sold_out());
 			if (id == 7) { Assert(qs(*data.vnext_offset()) == "1"); saved(14, "1"); }
 			else Assert(!data.vnext_offset());
 		} else if (id == 8 || id == 12 || id == 16) {

@@ -1419,6 +1419,9 @@ PRIVATE
     noveo/auth_client.h
     noveo/session_client.cpp
     noveo/session_actions.cpp
+    noveo/session_sync.cpp
+    noveo/sync_state.cpp
+    noveo/sync_state.h
     noveo/request_fields.h
     noveo/session_client.h
     intro/intro_phone.cpp

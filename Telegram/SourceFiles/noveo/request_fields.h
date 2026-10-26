@@ -7,6 +7,168 @@
 namespace Noveo {
 template <mtpTypeId Type> struct RequestFields;
 
+template <> struct RequestFields<mtpc_messages_getDialogs> {
+	MTPint flags;
+	MTPint folder_id;
+	MTPint offset_date;
+	MTPint offset_id;
+	MTPInputPeer offset_peer;
+	MTPint limit;
+	MTPlong hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& (!(flags.v & (1U << 1)) || folder_id.read(from, end))
+			&& offset_date.read(from, end)
+			&& offset_id.read(from, end)
+			&& offset_peer.read(from, end)
+			&& limit.read(from, end)
+			&& hash.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getPeerDialogs> {
+	MTPVector<MTPInputDialogPeer> peers;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peers.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_saveDraft> {
+	MTPint flags;
+	MTPInputReplyTo reply_to;
+	MTPInputPeer peer;
+	MTPstring message;
+	MTPVector<MTPMessageEntity> entities;
+	MTPInputMedia media;
+	MTPlong effect;
+	MTPSuggestedPost suggested_post;
+	MTPInputRichMessage rich_message;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& (!(flags.v & (1U << 4)) || reply_to.read(from, end))
+			&& peer.read(from, end)
+			&& message.read(from, end)
+			&& (!(flags.v & (1U << 3)) || entities.read(from, end))
+			&& (!(flags.v & (1U << 5)) || media.read(from, end))
+			&& (!(flags.v & (1U << 7)) || effect.read(from, end))
+			&& (!(flags.v & (1U << 8)) || suggested_post.read(from, end))
+			&& (!(flags.v & (1U << 9)) || rich_message.read(from, end))
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getAllDrafts> {
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_toggleDialogPin> {
+	MTPint flags;
+	MTPInputDialogPeer peer;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_reorderPinnedDialogs> {
+	MTPint flags;
+	MTPint folder_id;
+	MTPVector<MTPInputDialogPeer> order;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& folder_id.read(from, end)
+			&& order.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getPinnedDialogs> {
+	MTPint folder_id;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return folder_id.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_markDialogUnread> {
+	MTPint flags;
+	MTPInputPeer parent_peer;
+	MTPInputDialogPeer peer;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& (!(flags.v & (1U << 1)) || parent_peer.read(from, end))
+			&& peer.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getDialogUnreadMarks> {
+	MTPint flags;
+	MTPInputPeer parent_peer;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& (!(flags.v & (1U << 0)) || parent_peer.read(from, end))
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_folders_editPeerFolders> {
+	MTPVector<MTPInputFolderPeer> folder_peers;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return folder_peers.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_updateDialogFilter> {
+	MTPint flags;
+	MTPint id;
+	MTPDialogFilter filter;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& id.read(from, end)
+			&& (!(flags.v & (1U << 0)) || filter.read(from, end))
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_updateDialogFiltersOrder> {
+	MTPVector<MTPint> order;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return order.read(from, end)
+			&& from == end;
+	}
+};
+
 template <> struct RequestFields<mtpc_messages_editMessage> {
 	MTPint flags;
 	MTPInputPeer peer;

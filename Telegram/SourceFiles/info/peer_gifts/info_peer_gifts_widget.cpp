@@ -81,11 +81,13 @@ constexpr auto kPreloadButtonRows = 2;
 		.info = gift.info,
 		.from = sender,
 		.date = gift.date,
+		.issueNumber = to->session().account().noveoApi() ? gift.giftNum : 0,
 		.userpic = !to->session().account().noveoApi()
 			&& (unique ? (sender != nullptr) : true),
 		.pinned = gift.pinned,
 		.hidden = gift.hidden,
 		.mine = to->isSelf(),
+		.owned = (to->session().account().noveoApi() != nullptr),
 	};
 }
 

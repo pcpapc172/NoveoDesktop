@@ -1683,7 +1683,9 @@ void AddBlock(
 				gifts.push_back({
 					.transferId = gift.manageId,
 					.info = gift.info,
+					.issueNumber = peer->session().account().noveoApi() ? gift.giftNum : 0,
 					.mine = true,
+					.owned = (peer->session().account().noveoApi() != nullptr),
 				});
 			}
 		} else {
@@ -2519,7 +2521,13 @@ bool ShowNoveoGiftBox(
 		Data::SavedStarGiftId savedId) {
 	const auto client = controller->session().account().noveoApi();
 	if (!client) return false;
-	const auto info = messageId ? client->giftDetails(messageId) : client->giftInfo(giftId);
+	const auto instance = savedId
+		? client->savedGiftInfo(peerId, savedId.isUser()
+			? uint64(savedId.userMessageId().bare)
+			: savedId.chatSavedId())
+		: QJsonObject();
+	const auto info = messageId ? client->giftDetails(messageId)
+		: !instance.isEmpty() ? instance : client->giftInfo(giftId);
 	if (info.isEmpty()) return false;
 	const auto weak = base::make_weak(controller);
 	const auto peer = controller->session().data().peer(peerId);
@@ -2577,7 +2585,11 @@ bool ShowNoveoGiftBox(
 			const auto native = client ? Api::FromTL(&controller->session(), client->starGift(info)) : std::nullopt;
 			if (native) {
 				const auto container = box->verticalLayout();
-				const auto details = GiftSendDetails{ .descriptor = GiftTypeStars{ .info = *native } };
+				const auto details = GiftSendDetails{ .descriptor = GiftTypeStars{
+					.info = *native,
+					.issueNumber = info.value("issueIndex").toInt(),
+					.owned = bool(savedId),
+				} };
 				container->add(object_ptr<PreviewWrap>(container,
 					peer->owner().history(peer->session().userPeerId()),
 					rpl::single(GiftPreviewContent(peer, details))));

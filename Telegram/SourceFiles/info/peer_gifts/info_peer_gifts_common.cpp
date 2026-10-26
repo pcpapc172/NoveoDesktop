@@ -264,6 +264,7 @@ void GiftButton::setDescriptor(const GiftDescriptor &descriptor, Mode mode) {
 	}, [&](const GiftTypeStars &data) {
 		const auto soldOut = data.info.limitedCount
 			&& !data.userpic
+			&& !data.owned
 			&& !data.info.limitedLeft;
 		_userpic = (!data.userpic || (_mode == Mode::Selection))
 			? nullptr
@@ -739,6 +740,7 @@ void GiftButton::paint(QPainter &p, float64 craftProgress) {
 		&& !(stargift->pinned || stargift->pinnedSelection)
 		&& !unique
 		&& !stargift->userpic
+		&& !stargift->owned
 		&& stargift->info.limitedCount
 		&& !stargift->info.limitedLeft;
 	const auto extend = currentExtend();
@@ -926,7 +928,19 @@ void GiftButton::paint(QPainter &p, float64 craftProgress) {
 					: tr::lng_gift_stars_your_finished(tr::now))
 				: QString();
 			return GiftBadge{
-				.text = (onsale
+				.text = (data.owned && !unique
+					? (data.issueNumber > 0
+						? tr::lng_noveo_gift_issue_number(
+							tr::now,
+							lt_number,
+							Lang::FormatCountDecimal(data.issueNumber),
+							lt_amount,
+							Lang::FormatCountDecimal(count))
+						: tr::lng_gift_limited_of_count(
+							tr::now,
+							lt_amount,
+							Lang::FormatCountDecimal(count)))
+					: onsale
 					? tr::lng_gift_stars_on_sale(tr::now)
 					: (unique && (data.resale || pinned || data.mine))
 					? ('#' + Lang::FormatCountDecimal(unique->number))

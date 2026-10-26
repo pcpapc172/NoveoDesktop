@@ -32,13 +32,14 @@ async def main():
                         *("-I" + str(path) for path in includes),
                         str(ROOT / "tests/noveo/feature_client_probe.cpp"),
                         str(ROOT / "Telegram/SourceFiles/noveo/session_client.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/session_actions.cpp"),
+                        str(ROOT / "Telegram/SourceFiles/noveo/session_sync.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/sync_state.cpp"),
                         str(ROOT / "Telegram/SourceFiles/noveo/auth_client.cpp"), str(ROOT / "Telegram/lib_tl/tl/tl_basic_types.cpp"), str(scheme) + ".cpp",
                         str(ROOT / "Telegram/SourceFiles/data/data_peer_id.cpp"), "-include", str(tmp / "scheme.h"),
                         "-Wl,--gc-sections", "-o", str(binary), *flags], check=True)
         observed = {"reaction": [], "typing": [], "purchase": [], "claim": 0, "fave": 0, "sell": 0, "callback": 0, "voice": [], "voice_token": 0}
         user = {"userId": "test-user", "username": "Self", "avatarUrl": "https://localhost/avatar.png"}
         other = {"userId": "other-user", "username": "Other"}
-        gift = {"giftId": "gift-one", "giftNumber": 1, "name": "Fixture gift", "imageUrl": "https://localhost/gift.gif", "priceTenths": 1000}
+        gift = {"giftId": "gift-one", "giftNumber": 1, "name": "Fixture gift", "imageUrl": "https://localhost/gift.gif", "priceTenths": 1000, "initialStock": 100, "stockRemaining": 25, "issueIndex": 17}
         giveaway = {"giveawayId": "giveaway", "giverUserId": "other-user", "status": "open", "gift": gift}
         thumb = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII="
         messages = [{"messageId": "emoji", "senderId": "test-user", "timestamp": 1700000000, "content": {"text": "❤️"}},
