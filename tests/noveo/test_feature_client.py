@@ -32,7 +32,7 @@ async def main():
                         *("-I" + str(path) for path in includes),
                         str(ROOT / "tests/noveo/feature_client_probe.cpp"),
                         str(ROOT / "Telegram/SourceFiles/noveo/session_client.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/session_actions.cpp"),
-                        str(ROOT / "Telegram/SourceFiles/noveo/session_sync.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/sync_state.cpp"),
+                        str(ROOT / "Telegram/SourceFiles/noveo/session_premium.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/session_stars.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/session_sync.cpp"), str(ROOT / "Telegram/SourceFiles/noveo/sync_state.cpp"),
                         str(ROOT / "Telegram/SourceFiles/noveo/auth_client.cpp"), str(ROOT / "Telegram/lib_tl/tl/tl_basic_types.cpp"), str(scheme) + ".cpp",
                         str(ROOT / "Telegram/SourceFiles/data/data_peer_id.cpp"), "-include", str(tmp / "scheme.h"),
                         "-Wl,--gc-sections", "-o", str(binary), *flags], check=True)

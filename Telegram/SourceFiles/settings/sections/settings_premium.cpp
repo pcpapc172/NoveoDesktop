@@ -28,7 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/settings/info_settings_widget.h" // SectionCustomTopBarData.
 #include "lang/lang_keys.h"
 #include "main/main_app_config.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
+#include "noveo/economy_ui.h"
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common_session.h"
@@ -1304,6 +1306,18 @@ void BuildPremiumSectionContent(
 		SectionBuilder &builder,
 		std::shared_ptr<PremiumState> state) {
 	const auto controller = builder.controller();
+	if (builder.session()->account().noveoApi()) {
+		builder.addDividerText(tr::lng_noveo_premium_about());
+		builder.addButton({
+			.id = u"premium/noveo"_q,
+			.title = tr::lng_noveo_premium_manage(),
+			.onClick = [controller] {
+				Noveo::ShowPremium(controller->parentController());
+			},
+			.keywords = { u"membership"_q, u"subscription"_q, u"premium"_q },
+		});
+		return;
+	}
 
 	if (controller && state) {
 		builder.add([controller, state](const WidgetContext &ctx) {
@@ -1379,15 +1393,19 @@ Premium::Premium(
 })) {
 	setupContent();
 	setupSwipeBack();
-	controller->session().api().premium().reload();
+	if (!controller->session().account().noveoApi()) {
+		controller->session().api().premium().reload();
+	}
 }
 
 rpl::producer<QString> Premium::title() {
-	return tr::lng_premium_summary_title();
+	return controller()->session().account().noveoApi()
+		? tr::lng_noveo_premium_title()
+		: tr::lng_premium_summary_title();
 }
 
 bool Premium::hasFlexibleTopBar() const {
-	return true;
+	return !controller()->session().account().noveoApi();
 }
 
 rpl::producer<> Premium::sectionShowBack() {
@@ -1474,6 +1492,7 @@ void Premium::setupContent() {
 
 base::weak_qptr<Ui::RpWidget> Premium::createPinnedToTop(
 		not_null<QWidget*> parent) {
+	if (controller()->session().account().noveoApi()) return nullptr;
 	auto title = controller()->session().premium()
 		? tr::lng_premium_summary_title()
 		: rpl::conditional(
@@ -1666,6 +1685,7 @@ void Premium::showFinished() {
 
 base::weak_qptr<Ui::RpWidget> Premium::createPinnedToBottom(
 		not_null<Ui::RpWidget*> parent) {
+	if (controller()->session().account().noveoApi()) return nullptr;
 	const auto content = Ui::CreateChild<Ui::RpWidget>(parent.get());
 
 	if (Ref::Gift::Parse(_state->ref)) {
@@ -1824,6 +1844,10 @@ void ShowPremium(not_null<::Main::Session*> session, const QString &ref) {
 void ShowPremium(
 		not_null<Window::SessionController*> controller,
 		const QString &ref) {
+	if (controller->session().account().noveoApi()) {
+		Noveo::ShowPremium(controller);
+		return;
+	}
 	controller->window().activate();
 	if (!controller->session().premiumPossible()) {
 		controller->show(Box(PremiumUnavailableBox));
@@ -1863,6 +1887,10 @@ void ShowPremiumGiftPremium(
 void StartPremiumPayment(
 		not_null<Window::SessionController*> controller,
 		const QString &ref) {
+	if (controller->session().account().noveoApi()) {
+		Noveo::ShowPremium(controller);
+		return;
+	}
 	const auto session = &controller->session();
 	const auto username = session->appConfig().get<QString>(
 		u"premium_bot_username"_q,

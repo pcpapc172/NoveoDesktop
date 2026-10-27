@@ -355,7 +355,7 @@ bool Session::premium() const {
 }
 
 bool Session::premiumPossible() const {
-	return premium() || premiumCanBuy();
+	return _account->noveoApi() || premium() || premiumCanBuy();
 }
 
 bool Session::premiumBadgesShown() const {
@@ -363,6 +363,7 @@ bool Session::premiumBadgesShown() const {
 }
 
 rpl::producer<bool> Session::premiumPossibleValue() const {
+	if (_account->noveoApi()) return rpl::single(true);
 	using namespace rpl::mappers;
 
 	auto premium = _user->flagsValue(

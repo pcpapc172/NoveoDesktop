@@ -8831,3 +8831,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_noveo_permission_view_members" = "View members";
 
 "lng_noveo_gift_issue_number" = "{number} of {amount}";
+
+"lng_noveo_gifts" = "Gifts";
+"lng_noveo_premium_title" = "Noveo Premium";
+"lng_noveo_premium_about" = "Manage your Noveo membership with Premium Bot. View your current plan, subscribe, submit a payment receipt, or cancel your subscription from the bot chat.";
+"lng_noveo_premium_manage" = "Open Premium Bot";
+"lng_noveo_stars_not_enough" = "Not enough Stars";
+"lng_noveo_share_stars" = "Share Stars";
+"lng_noveo_share_stars_about" = "Balance: {amount} Stars. Share Stars in {peer}. The first person to claim receives them.";
+"lng_noveo_share_stars_confirm" = "Share {amount} Stars in {peer}? The first person to claim receives them.";
+"lng_noveo_stars_amount" = "Amount in Stars";
+"lng_noveo_premium_checkout" = "Noveo Premium Checkout";
+"lng_noveo_premium_checkout_about" = "Noveo Premium subscription\nMonthly subscription: 50,000 IRT\n\nContinue to bank-transfer instructions and attach your payment receipt. Your subscription starts after the receipt is approved.";
+"lng_noveo_premium_accept" = "I agree to the subscription terms and manual receipt review.";
+"lng_noveo_receipt_title" = "Payment receipt";
+"lng_noveo_receipt_details" = "Transfer 50,000 IRT to the card below, then attach your receipt.\n\nCard number: 6219861443972426\nCardholder: سید مسعود ترابی\n\nYour payment will be reviewed before Premium is activated.";
+"lng_noveo_receipt_choose" = "Choose receipt image";
+"lng_noveo_receipt_selected" = "Receipt image selected";
+"lng_noveo_receipt_pending" = "Receipt submitted. Your payment is awaiting review.";

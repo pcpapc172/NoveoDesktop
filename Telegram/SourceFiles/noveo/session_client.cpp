@@ -513,6 +513,7 @@ void SessionClient::authenticated(const QJsonObject &profile) {
 	_auth->send({{"type", "resync_state"}});
 	contacts();
 	gifts();
+	loadWallet();
 	syncRefresh();
 	api(--_internalRequest, "/user/notifications", {}, [this](QJsonObject frame) {
 		applyNotifications(frame);
@@ -541,6 +542,14 @@ void SessionClient::disconnected() {
 }
 
 void SessionClient::reset() {
+	_premiumIcons.clear();
+	_wallet = {};
+	_walletWaiters.clear();
+	_economyRequests.clear();
+	_starsActions.clear();
+	_walletBalance = 0;
+	_walletRevision = 0;
+	_walletLoading = _walletLoaded = false;
 	++_syncGeneration;
 	_syncRetry.stop();
 	_sync = SyncState();
@@ -679,6 +688,20 @@ MTPUser SessionClient::user(const QJsonObject &profile, bool contact) {
 	if (profile.value("isBot").toBool()) {
 		flags |= MTPDuser::Flag::f_bot;
 	}
+	const auto tier = Text(profile.value("membershipTier")).toLower();
+	const auto premium = profile.contains("membershipTier")
+		? tier == "premium" || tier == "silver"
+		: profile.value("isPremium").toBool(profile.value("premium").toBool(profile.value("hasPremium").toBool()));
+	if (premium) flags |= MTPDuser::Flag::f_premium;
+	auto emojiStatus = MTPEmojiStatus();
+	if (const auto icon = registerPremiumIcon(profile.value("premiumStarIcon").toObject())) {
+		emojiStatus = MTP_emojiStatus(MTP_flags(MTPDemojiStatus::Flags()), MTP_long(icon), MTPint());
+		flags |= MTPDuser::Flag::f_emoji_status;
+	}
+	const auto profileColor = premiumProfileColor(profile);
+	if (profileColor.type() == mtpc_peerColor && profileColor.c_peerColor().vflags().v) {
+		flags |= MTPDuser::Flag::f_profile_color;
+	}
 	auto name = Text(profile.value("contactName"));
 	if (name.isEmpty()) {
 		name = Text(profile.value("displayName"));
@@ -711,8 +734,8 @@ MTPUser SessionClient::user(const QJsonObject &profile, bool contact) {
 	}
 	return MTP_user(MTP_flags(flags), MTP_long(id.bare), MTP_long(1), MTP_string(name), MTPstring(),
 		MTP_string(handle), MTPstring(), MTPUserProfilePhoto(), status, MTPint(),
-		MTPVector<MTPRestrictionReason>(), MTPstring(), MTPstring(), MTPEmojiStatus(),
-		MTPVector<MTPUsername>(), MTPRecentStory(), MTPPeerColor(), MTPPeerColor(), MTPint(),
+		MTPVector<MTPRestrictionReason>(), MTPstring(), MTPstring(), emojiStatus,
+		MTPVector<MTPUsername>(), MTPRecentStory(), MTPPeerColor(), profileColor, MTPint(),
 		MTPlong(), MTPlong(), MTPlong());
 }
 
@@ -1266,6 +1289,11 @@ void SessionClient::history(const QJsonArray &chats) {
 }
 
 void SessionClient::message(const QJsonObject &frame) {
+	if (frame.value("type") == "wallet_updated") {
+		++_walletRevision;
+		applyWallet(frame.value("balanceTenths").toInteger());
+		return;
+	}
 	const auto syncType = frame.value("type").toString();
 	if (syncType == "account_sync_state" || syncType == "account_sync_update") {
 		syncAccept(frame);
@@ -2720,7 +2748,7 @@ void SessionClient::drain() {
 		const auto now = int(QDateTime::currentSecsSinceEpoch());
 		const auto state = MTPupdates_State(
 			MTP_updates_state(MTP_int(_pts), MTP_int(0), MTP_int(now), MTP_int(0), MTP_int(0)));
-		if (syncRequest(id, body) || parityRequest(id, body) || featureRequest(id, body) || mediaRequest(id, body)) {
+		if (premiumRequest(id, body) || economyRequest(id, body) || syncRequest(id, body) || parityRequest(id, body) || featureRequest(id, body) || mediaRequest(id, body)) {
 			continue;
 		}
 		if (type == mtpc_updates_getState) {
@@ -3037,7 +3065,7 @@ void SessionClient::drain() {
 				}
 			}
 			finish();
-			reply(id, MTP_vector<MTPUser>(result));
+			reply(id, MTPVector<MTPUser>(MTP_vector<MTPUser>(result)));
 		} else {
 			finish();
 			fail(id, "NOVEO_METHOD_UNSUPPORTED");

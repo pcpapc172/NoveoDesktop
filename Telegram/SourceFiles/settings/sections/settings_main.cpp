@@ -40,10 +40,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "menu/menu_checked_action.h"
-#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "main/main_domain.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
+#include "noveo/economy_ui.h"
+#include "noveo/session_client.h"
 #include "main/main_session_settings.h"
 #include "settings/settings_builder.h"
 #include "settings/cloud_password/settings_cloud_password_input.h"
@@ -513,8 +515,14 @@ void BuildPremiumSection(SectionBuilder &builder) {
 
 	builder.addPremiumButton({
 		.id = u"main/premium"_q,
-		.title = tr::lng_premium_summary_title(),
+		.title = session->account().noveoApi()
+			? tr::lng_noveo_premium_title()
+			: tr::lng_premium_summary_title(),
 		.onClick = [=] {
+			if (session->account().noveoApi()) {
+				Noveo::ShowPremium(controller->parentController());
+				return;
+			}
 			controller->setPremiumRef("settings");
 			showOther(PremiumId());
 		},
@@ -538,6 +546,17 @@ void BuildPremiumSection(SectionBuilder &builder) {
 		},
 		.keywords = { u"stars"_q, u"balance"_q },
 	});
+	if (session->account().noveoApi()) {
+		builder.addButton({
+			.id = u"main/send-gift"_q,
+			.title = tr::lng_noveo_gifts(),
+			.icon = { .icon = &st::menuIconGiftPremium },
+			.onClick = [=] { Ui::ChooseStarGiftRecipient(controller); },
+			.keywords = { u"gifts"_q, u"present"_q },
+		});
+		builder.addSkip();
+		return;
+	}
 
 	session->credits().tonLoad();
 	builder.addButton({

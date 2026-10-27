@@ -1420,6 +1420,10 @@ PRIVATE
     noveo/session_client.cpp
     noveo/session_actions.cpp
     noveo/session_sync.cpp
+    noveo/session_stars.cpp
+    noveo/session_premium.cpp
+    noveo/economy_ui.cpp
+    noveo/economy_ui.h
     noveo/sync_state.cpp
     noveo/sync_state.h
     noveo/request_fields.h

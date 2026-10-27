@@ -32,7 +32,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "inline_bots/bot_attach_web_view.h"
 #include "payments/payments_checkout_process.h"
 #include "payments/payments_non_panel_process.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
+#include "noveo/economy_ui.h"
+#include "noveo/session_client.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
@@ -85,6 +88,11 @@ void SendBotCallbackData(
 		sendData = button->data;
 	}
 	const auto withPassword = password.has_value();
+	if (session->account().noveoApi() && sendData == "pb:pay"
+		&& history->peer->id == peerFromUser(Noveo::NativeUserId("00000000-0000-0000-0000-000000000007"))) {
+		Noveo::ShowPremiumCheckout(controller);
+		return;
+	}
 	if (withPassword) {
 		flags |= MTPmessages_GetBotCallbackAnswer::Flag::f_password;
 	}

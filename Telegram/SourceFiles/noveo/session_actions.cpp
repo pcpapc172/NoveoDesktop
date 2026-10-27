@@ -150,7 +150,7 @@ void SessionClient::wireEvent(const QJsonObject &frame) {
 		const auto raw = frame.value("userId").toString(user.value("userId").toString(user.value("id").toString()));
 		if (raw != _self) return;
 		const auto changed = user.isEmpty() ? frame : user;
-		for (const auto field : {"username", "bio", "handle"}) {
+		for (const auto field : {"username", "bio", "handle", "profileSkin", "premiumStarIcon", "premiumStarIcons", "nicknameFont"}) {
 			if (sent.contains(field) && changed.value(field) != sent.value(field)) return;
 		}
 	}

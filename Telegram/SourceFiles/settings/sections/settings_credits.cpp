@@ -33,7 +33,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/settings/info_settings_widget.h"
 #include "info/statistics/info_statistics_list_controllers.h"
 #include "lang/lang_keys.h"
+#include "main/main_account.h"
 #include "main/main_session.h"
+#include "noveo/economy_ui.h"
 #include "settings/sections/settings_main.h"
 #include "settings/settings_builder.h"
 #include "settings/settings_common.h"
@@ -496,7 +498,7 @@ void Credits::setupContent() {
 	};
 	const auto state = content->lifetime().make_state<State>();
 
-	{
+	if (!controller()->session().account().noveoApi()) {
 		const auto button = content->add(
 			object_ptr<Ui::RoundButton>(
 				content,
@@ -955,6 +957,20 @@ void BuildCreditsButtons(
 	const auto session = builder.session();
 	const auto controller = builder.controller();
 	const auto self = session->user();
+	if (session->account().noveoApi() && !isCurrency) {
+		const auto button = builder.addButton({
+			.id = u"stars/gift"_q,
+			.title = tr::lng_noveo_share_stars(),
+			.st = &st::settingsCreditsButton,
+			.icon = { &st::settingsButtonIconGift },
+			.onClick = [controller] {
+				Noveo::ShowShareStars(controller->parentController());
+			},
+			.keywords = { u"send"_q, u"share"_q, u"stars"_q },
+		});
+		if (giftButton) *giftButton = button;
+		return;
+	}
 
 	if (!isCurrency) {
 		auto statsShown = session->credits().loadedValue(
@@ -1111,6 +1127,9 @@ BuyStarsHandler::~BuyStarsHandler() = default;
 Fn<void()> BuyStarsHandler::handler(
 		std::shared_ptr<::Main::SessionShow> show,
 		Fn<void()> paid) {
+	if (show->session().account().noveoApi()) {
+		return [show] { show->showToast(tr::lng_noveo_stars_not_enough(tr::now)); };
+	}
 	const auto optionsBox = [=](not_null<Ui::GenericBox*> box) {
 		box->setStyle(st::giveawayGiftCodeBox);
 		box->setWidth(st::boxWideWidth);

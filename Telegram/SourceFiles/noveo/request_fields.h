@@ -7,6 +7,136 @@
 namespace Noveo {
 template <mtpTypeId Type> struct RequestFields;
 
+template <> struct RequestFields<mtpc_help_getPeerProfileColors> {
+	MTPint hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return hash.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_payments_getStarsStatus> {
+	MTPint flags;
+	MTPInputPeer peer;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_payments_getStarsTransactions> {
+	MTPint flags;
+	MTPstring subscription_id;
+	MTPInputPeer peer;
+	MTPstring offset;
+	MTPint limit;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& (!(flags.v & (1U << 3)) || subscription_id.read(from, end))
+			&& peer.read(from, end)
+			&& offset.read(from, end)
+			&& limit.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_payments_getStarsTransactionsByID> {
+	MTPint flags;
+	MTPInputPeer peer;
+	MTPVector<MTPInputStarsTransaction> id;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& id.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_payments_getStarsSubscriptions> {
+	MTPint flags;
+	MTPInputPeer peer;
+	MTPstring offset;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& offset.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_account_getDefaultEmojiStatuses> {
+	MTPlong hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return hash.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_account_getRecentEmojiStatuses> {
+	MTPlong hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return hash.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_account_getChannelDefaultEmojiStatuses> {
+	MTPlong hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return hash.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_account_updateEmojiStatus> {
+	MTPEmojiStatus emoji_status;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return emoji_status.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_account_updateColor> {
+	MTPint flags;
+	MTPPeerColor color;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& (!(flags.v & (1U << 2)) || color.read(from, end))
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getCustomEmojiDocuments> {
+	MTPVector<MTPlong> document_id;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return document_id.read(from, end)
+			&& from == end;
+	}
+};
+
 template <> struct RequestFields<mtpc_messages_getDialogs> {
 	MTPint flags;
 	MTPint folder_id;

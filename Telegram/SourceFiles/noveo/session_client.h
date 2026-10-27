@@ -63,6 +63,12 @@ public:
 	[[nodiscard]] QJsonObject giftInfo(uint64 id) const;
 	[[nodiscard]] QJsonObject savedGiftInfo(PeerId peer, uint64 id) const;
 	[[nodiscard]] MTPStarGift starGift(const QJsonObject &info) const;
+	void loadWallet(std::function<void(QJsonObject, QString)> done = {});
+	void createStarsGiveaway(PeerId peer, QString amount, std::function<void(QString)> done);
+	void submitPremiumReceipt(QString path, std::function<void(QString)> done, QByteArray content = {});
+	[[nodiscard]] qint64 walletBalance() const { return _walletBalance; }
+	[[nodiscard]] QString membershipTier() const;
+	[[nodiscard]] MTPUser premiumBotUser();
 
 	struct LocalSyncState {
 		QVector<MTPDialogFilter> filters;
@@ -76,6 +82,22 @@ public:
 	std::function<void(PeerId, const QUrl &)> onAvatar;
 
 private:
+	bool economyRequest(mtpRequestId id, const mtpBuffer &body);
+	bool premiumRequest(mtpRequestId id, const mtpBuffer &body);
+	uint64 registerPremiumIcon(const QJsonObject &icon);
+	[[nodiscard]] MTPPeerColor premiumProfileColor(const QJsonObject &profile);
+	[[nodiscard]] MTPDocument premiumIconDocument(uint64 id) const;
+	QMap<uint64, QJsonObject> _premiumIcons;
+	void applyWallet(qint64 balance);
+	[[nodiscard]] MTPpayments_StarsStatus starsStatus(const QJsonObject &wallet, int flags = 0, int offset = 0, int limit = 50, const QSet<QString> &ids = {}) const;
+	QJsonObject _wallet;
+	QVector<std::function<void(QJsonObject, QString)>> _walletWaiters;
+	QSet<mtpRequestId> _economyRequests;
+	QSet<uint64> _starsActions;
+	qint64 _walletBalance = 0;
+	int _walletRevision = 0;
+	bool _walletLoading = false;
+	bool _walletLoaded = false;
 	struct SyncWaiter {
 		mtpRequestId requestId = 0;
 		qint64 sequence = 0;

@@ -6,6 +6,9 @@ For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/gift_credits_box.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
+#include "noveo/economy_ui.h"
 
 #include "api/api_credits.h"
 #include "boxes/filters/edit_filter_chats_list.h"
@@ -185,6 +188,10 @@ void GiftCreditsBox(
 void ShowGiftCreditsBox(
 		not_null<Window::SessionController*> controller,
 		Fn<void()> gifted) {
+	if (controller->session().account().noveoApi()) {
+		Noveo::ShowShareStars(controller);
+		return;
+	}
 
 	class Controller final : public ContactsBoxController {
 	public:
