@@ -2585,11 +2585,13 @@ bool ShowNoveoGiftBox(
 			const auto native = client ? Api::FromTL(&controller->session(), client->starGift(info)) : std::nullopt;
 			if (native) {
 				const auto container = box->verticalLayout();
-				const auto details = GiftSendDetails{ .descriptor = GiftTypeStars{
-					.info = *native,
-					.issueNumber = info.value("issueIndex").toInt(),
-					.owned = bool(savedId),
-				} };
+				auto descriptor = GiftTypeStars();
+				descriptor.info = *native;
+				descriptor.issueNumber = info.value("issueIndex").toInt();
+				descriptor.owned = bool(savedId);
+				const auto details = GiftSendDetails{
+					.descriptor = std::move(descriptor),
+				};
 				container->add(object_ptr<PreviewWrap>(container,
 					peer->owner().history(peer->session().userPeerId()),
 					rpl::single(GiftPreviewContent(peer, details))));

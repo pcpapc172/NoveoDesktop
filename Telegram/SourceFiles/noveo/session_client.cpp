@@ -36,6 +36,12 @@ QString RawId(const QJsonObject &object) {
 												  : Text(object.value("userId"));
 }
 
+bool SameAuthorization(const QJsonObject &a, const QJsonObject &b) {
+	return a.value("token") == b.value("token")
+		&& RawId(a.value("user").toObject())
+			== RawId(b.value("user").toObject());
+}
+
 int Date(const QJsonObject &object) {
 	for (const auto key : {"timestamp", "createdAt", "created_at", "date", "time"}) {
 		const auto value = object.value(key);
@@ -753,7 +759,7 @@ void SessionClient::contacts() {
 		const auto ok = reply->error() == QNetworkReply::NoError && status == 200
 			&& document.object().value("contacts").isArray();
 		reply->deleteLater();
-		if (authorization != _auth->authorization()) {
+		if (!SameAuthorization(authorization, _auth->authorization())) {
 			contacts();
 			return;
 		}
@@ -819,7 +825,7 @@ void SessionClient::gifts() {
 	connect(reply, &QNetworkReply::finished, this, [this, reply, response, authorization] {
 		response->append(reply->readAll());
 		reply->deleteLater();
-		if (authorization != _auth->authorization()) {
+		if (!SameAuthorization(authorization, _auth->authorization())) {
 			return;
 		}
 		_giftsLoading = false;
@@ -1895,7 +1901,7 @@ void SessionClient::upload(
 			auto file = object.value("file").toObject();
 			if (path != "/upload/file" && object.value("success").toBool()) file.insert("url", object.value("url"));
 			_transfers.remove(id);
-			if (!ok || authorization != _auth->authorization() || FileUrl(file).isEmpty()) {
+			if (!ok || !SameAuthorization(authorization, _auth->authorization()) || FileUrl(file).isEmpty()) {
 				cancel(id);
 				fail(id, "NOVEO_UPLOAD_FAILED");
 				return;
@@ -2198,8 +2204,7 @@ void SessionClient::api(mtpRequestId id, const QString &path, const QJsonObject 
 			const auto conflict = syncConflict && status == 409
 				&& document.object().value("error") == "STATE_VERSION_CONFLICT"
 				&& document.object().value("items").isArray();
-			if (authorization.value("token") != current.value("token")
-				|| authorization.value("user").toObject().value("userId") != current.value("user").toObject().value("userId")
+			if (!SameAuthorization(authorization, current)
 				|| (!conflict && (transfer->error() != QNetworkReply::NoError || status < 200 || status >= 300))
 				|| response->size() > 8 * 1024 * 1024 || !document.isObject()
 				|| (!conflict && document.object().value("success") == false)) {

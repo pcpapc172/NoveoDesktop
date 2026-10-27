@@ -222,7 +222,9 @@ std::unique_ptr<MTP::Config> Account::start(MTP::AuthKeyPtr localKey) {
 	Expects(localKey != nullptr);
 
 	_localKey = std::move(localKey);
-	readMapWith(_localKey);
+	if (readMapWith(_localKey) == ReadMapResult::Failed) {
+		readMtpData();
+	}
 	clearLegacyFiles();
 	return readMtpConfig();
 }

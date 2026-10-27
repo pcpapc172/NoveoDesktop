@@ -44,6 +44,12 @@ async def main():
                   "messages": [message("g1", 1700000003)]},
                  {"chatId": "channel-chat", "chatType": "channel", "chatName": "Channel",
                   "messages": [message("c1", 1700000004)]}]
+        chats[1]["messages"].append(message("gift-history", 1700000005, text="[gift](fixture-gift)"))
+        async def gifts(request):
+            await asyncio.sleep(0.15)
+            return web.json_response({"gifts": []})
+        async def sync_state(request):
+            return web.json_response({"success": True, "type": "account_sync_state", "revision": 0, "items": []})
         async def contacts(request):
             assert request.headers.get("X-User-ID") == "test-user"
             assert request.headers.get("X-Auth-Token") == "test-token"
@@ -103,6 +109,8 @@ async def main():
                 notification_state["revision"] += 1
             return web.json_response({"success": True, **notification_state})
         app = web.Application()
+        app.router.add_get("/gifts/catalog", gifts)
+        app.router.add_get("/user/sync", sync_state)
         app.router.add_get("/user/notifications", notifications)
         app.router.add_post("/user/notifications", notifications)
         app.router.add_get("/ws", websocket)
