@@ -1150,6 +1150,14 @@ std::unique_ptr<Main::SessionSettings> Account::applyReadContext(
 void Account::writeMtpData() {
 	Expects(_localKey != nullptr);
 
+	if (_owner->sessionExists()
+		&& !QFile::exists(_basePath + u"maps"_q)
+		&& !QFile::exists(_basePath + u"map0"_q)
+		&& !QFile::exists(_basePath + u"map1"_q)) {
+		_mapChanged = true;
+		writeMap();
+	}
+
 	const auto serialized = _owner->serializeMtpAuthorization();
 	const auto size = sizeof(quint32) + Serialize::bytearraySize(serialized);
 

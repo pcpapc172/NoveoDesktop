@@ -653,8 +653,6 @@ void Account::prepareNoveoClient() {
 			createSession(user);
 		}
 		local().writeMtpData(); // Existing encrypted account storage.
-		local().writeMapDelayed();
-		local().writeMap();
 		Local::sync();
 	};
 	Core::App().settings().proxy().connectionTypeValue(
