@@ -16,8 +16,11 @@ caches are reused. Optimized objects and Windows release dependencies have
 separate snapshot names so release builds do not overwrite Debug build trees.
 The first release compiles optimized objects and may prepare Windows release
 libraries. Subsequent release runs restore those release snapshots and reuse
-unchanged objects. Cold dependency preparation is disabled by default and may
-be explicitly enabled through the workflow input.
+unchanged objects. If Windows dependency preparation fails, its partial
+snapshot is saved for the next run. The release preparation omits Breakpad's
+symbol-dumping tool; the crash-handler libraries are still built. Cold
+dependency preparation is disabled by default and may be explicitly enabled
+through the workflow input.
 
 The GitHub release tag is independent of the inherited Telegram core version:
 keeping that internal version preserves compatibility with existing data.

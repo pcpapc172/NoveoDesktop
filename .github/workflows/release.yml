@@ -17,10 +17,6 @@ permissions:
   packages: write
   actions: read
 
-concurrency:
-  group: noveo-release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   linux:
     uses: ./.github/workflows/linux.yml

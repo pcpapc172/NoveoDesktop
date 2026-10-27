@@ -9,6 +9,9 @@ import zipfile
 spec = importlib.util.spec_from_file_location('package_release', Path(__file__).with_name('package_release.py'))
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+prepare_spec = importlib.util.spec_from_file_location('prepare_release', Path(__file__).with_name('prepare_release.py'))
+prepare = importlib.util.module_from_spec(prepare_spec)
+prepare_spec.loader.exec_module(prepare)
 
 
 class PackageReleaseTest(unittest.TestCase):
@@ -45,6 +48,15 @@ class PackageReleaseTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 module.package('linux', root, root / 'out', 'invalid')
             self.assertFalse((root / 'out').exists())
+
+    def test_windows_preparation_preserves_release_crash_handler(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / 'Telegram/build/prepare/prepare.py').read_text(encoding='utf-8')
+        prepared = prepare.without_symbol_tool(source)
+        self.assertNotIn('msbuild -m dump_syms.vcxproj', prepared)
+        self.assertIn('ninja -C out/Release%FolderPostfix% common crash_generation_client exception_handler', prepared)
+        with self.assertRaises(RuntimeError):
+            prepare.without_symbol_tool(prepared)
 
 
 if __name__ == '__main__':
