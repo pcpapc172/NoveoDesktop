@@ -63,7 +63,10 @@ def add_snapshot(archive, source, name):
     if source.is_symlink() and not source.exists():
         print(f'::notice::Skipping dangling dependency link: {name}')
         return
-    archive.add(source, arcname=name, recursive=False)
+    def exact_time(member):
+        member.pax_headers['noveo.mtime_ns'] = str(source.stat().st_mtime_ns)
+        return member
+    archive.add(source, arcname=name, recursive=False, filter=exact_time)
     if source.is_dir():
         for child in sorted(source.iterdir()):
             add_snapshot(archive, child, f'{name}/{child.name}')
@@ -102,6 +105,10 @@ def main():
             with open_archive(archive_path, 'r', args.compression) as archive:
                 for member in validate_members(archive, args.paths):
                     archive.extract(member, args.root, filter='data')
+                    if member.isfile() and 'noveo.mtime_ns' in member.pax_headers:
+                        path = args.root / member.name
+                        os.utime(path, ns=(path.stat().st_atime_ns,
+                                          int(member.pax_headers['noveo.mtime_ns'])))
             print(f'Restored registry snapshot: {reference}')
             output(True)
         else:

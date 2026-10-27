@@ -28,10 +28,11 @@ class RegistryCacheTest(unittest.TestCase):
             root = Path(directory)
             build = root / 'out'
             build.mkdir()
-            source = root / 'source.txt'
-            source.write_text('original')
-            (build / 'build.ninja').write_text('rule copy\n  command = cp $in $out\nbuild result: copy ../source.txt\n')
+            source = root / 'source.cpp'
+            source.write_text('int value() { return 42; }\n')
+            (build / 'build.ninja').write_text('rule cc\n  command = c++ -MMD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\nbuild result: cc ../source.cpp\n')
             subprocess.run(['ninja', '-C', str(build)], check=True, capture_output=True)
+            original_time = (build / 'result').stat().st_mtime_ns
             stored = root / 'registry'
             stored.mkdir()
             original_run = subprocess.run
@@ -57,11 +58,13 @@ class RegistryCacheTest(unittest.TestCase):
                 args[1] = 'pull'
                 with patch('sys.argv', args):
                     cache.main()
+                self.assertEqual((build / 'result').stat().st_mtime_ns, original_time)
                 self.assertIn('no work to do', subprocess.check_output(['ninja', '-C', str(build)], text=True))
-                source.write_text('changed')
+                original_object = (build / 'result').read_bytes()
+                source.write_text('int value() { return 99; }\n')
                 os.utime(source, (source.stat().st_atime, (build / 'result').stat().st_mtime + 2))
                 self.assertNotIn('no work to do', subprocess.check_output(['ninja', '-C', str(build)], text=True))
-                self.assertEqual((build / 'result').read_text(), 'changed')
+                self.assertNotEqual((build / 'result').read_bytes(), original_object)
                 metadata = json.loads((stored / 'snapshot.json').read_text())
                 metadata['key'] = 'incompatible'
                 (stored / 'snapshot.json').write_text(json.dumps(metadata))

@@ -2,6 +2,8 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import tarfile
+import shutil
 import tempfile
 import time
 import unittest
@@ -65,6 +67,28 @@ class BuildCacheTest(unittest.TestCase):
         cache.restore(self.root, self.manifest)
         self.assertNotIn("no work to do", ninja())
         self.assertEqual((build / "result").read_text(), "second")
+
+    def test_archived_compiler_dependencies_keep_outputs_reusable(self):
+        source = self.track('source.cpp', 'int value() { return 42; }\n')
+        build = self.root / 'out'
+        build.mkdir()
+        (build / 'build.ninja').write_text('rule cc\n  command = c++ -MMD -MF $out.d -c $in -o $out\n  depfile = $out.d\n  deps = gcc\nbuild result.o: cc ../source.cpp\n')
+        def ninja():
+            return subprocess.check_output(['ninja', '-C', str(build)], text=True)
+        ninja()
+        cache.save(self.root, self.manifest)
+        archive = self.root / 'snapshot.tar.gz'
+        with tarfile.open(archive, 'w:gz') as stored:
+            stored.add(build, arcname='out')
+        shutil.rmtree(build)
+        with tarfile.open(archive) as stored:
+            stored.extractall(self.root, filter='data')
+        cache.restore(self.root, self.manifest)
+        self.assertIn('no work to do', ninja())
+        source.write_text('int value() { return 99; }\n')
+        os.utime(source, ns=(time.time_ns() + 1_000_000_000,) * 2)
+        cache.restore(self.root, self.manifest)
+        self.assertNotIn('no work to do', ninja())
 
 
 if __name__ == "__main__":

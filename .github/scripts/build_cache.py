@@ -4,6 +4,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 
 
@@ -63,6 +65,33 @@ def restore(root, manifest):
             os.utime(path, ns=(stat.st_atime_ns, record[1]))
             restored += 1
     print(f"Restored timestamps for {restored} unchanged inputs; changed inputs remain fresh.")
+    restore_dependency_times(root)
+
+
+def restore_dependency_times(root):
+    build = (root / 'out').resolve()
+    ninja = shutil.which('ninja')
+    if not ninja or not (build / '.ninja_deps').exists():
+        return
+    result = subprocess.run([ninja, '-t', 'deps'], cwd=build,
+                            capture_output=True, text=True)
+    if result.returncode:
+        print('Dependency timestamps unavailable; Ninja will revalidate outputs.')
+        return
+    restored = 0
+    for line in result.stdout.splitlines():
+        match = re.fullmatch(r'(.+): #deps \d+, deps mtime (\d+) \([^)]*\)', line)
+        if not match:
+            continue
+        path = build / match[1]
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(build):
+            continue
+        stamp = int(match[2])
+        stat = path.stat()
+        if 0 < abs(stat.st_mtime_ns - stamp) <= 1000:
+            os.utime(path, ns=(stat.st_atime_ns, stamp))
+            restored += 1
+    print(f'Restored exact timestamps for {restored} archived dependency outputs.')
 
 
 if __name__ == "__main__":
