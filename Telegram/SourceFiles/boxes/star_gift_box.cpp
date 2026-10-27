@@ -2585,8 +2585,7 @@ bool ShowNoveoGiftBox(
 			const auto native = client ? Api::FromTL(&controller->session(), client->starGift(info)) : std::nullopt;
 			if (native) {
 				const auto container = box->verticalLayout();
-				auto descriptor = GiftTypeStars();
-				descriptor.info = *native;
+				auto descriptor = GiftTypeStars{ .info = *native };
 				descriptor.issueNumber = info.value("issueIndex").toInt();
 				descriptor.owned = bool(savedId);
 				const auto details = GiftSendDetails{
