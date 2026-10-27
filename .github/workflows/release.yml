@@ -11,6 +11,10 @@ on:
         description: Allow rebuilding dependencies if the prepared environment is missing
         type: boolean
         default: false
+      linux_self_hosted:
+        description: Build Linux on the dedicated noveo-build self-hosted runner
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -23,6 +27,7 @@ jobs:
     with:
       configuration: Release
       build_missing_environment: ${{ inputs.build_missing_environment }}
+      self_hosted: ${{ inputs.linux_self_hosted }}
 
   windows:
     uses: ./.github/workflows/win.yml

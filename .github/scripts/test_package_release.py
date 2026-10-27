@@ -58,6 +58,18 @@ class PackageReleaseTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             prepare.without_symbol_tool(prepared)
 
+    def test_windows_qt_preparation_builds_only_optimized_configuration(self):
+        root = Path(__file__).resolve().parents[2]
+        source = (root / 'Telegram/build/prepare/prepare.py').read_text(encoding='utf-8')
+        prepared = prepare.release_qt_only(source)
+        qt = prepared[prepared.index("else: # qt > '6'"):prepared.index("stage('tg_owt'")]
+        self.assertIn('SET CONFIGURATIONS=-release', qt)
+        self.assertIn('cmake --build . --config Release', qt)
+        self.assertNotIn('cmake --build . --config Debug', qt)
+        self.assertNotIn('        -force-debug-info ^', qt)
+        with self.assertRaises(RuntimeError):
+            prepare.release_qt_only(prepared)
+
 
 if __name__ == '__main__':
     unittest.main()

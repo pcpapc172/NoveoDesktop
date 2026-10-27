@@ -12,6 +12,9 @@ on:
       build_missing_environment:
         type: boolean
         default: false
+      self_hosted:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       configuration:
@@ -27,6 +30,10 @@ on:
         description: Build dependencies if neither the registry nor cache has them
         type: boolean
         default: true
+      self_hosted:
+        description: Use the dedicated noveo-build Linux runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,7 +47,7 @@ jobs:
 
   linux:
     name: Rocky Linux 8
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.self_hosted && fromJSON('["self-hosted", "Linux", "X64", "noveo-build"]') || 'ubuntu-latest' }}
     timeout-minutes: 360
 
     strategy:
@@ -73,6 +80,13 @@ jobs:
           echo "REGISTRY_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-cache" >> "$GITHUB_ENV"
           echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-build:$BUILD_ENV_HASH" >> "$GITHUB_ENV"
 
+      - name: Isolate registry credentials on self-hosted runners.
+        if: inputs.self_hosted
+        run: |
+          mkdir -p "$RUNNER_TEMP/noveo-docker-config"
+          chmod 700 "$RUNNER_TEMP/noveo-docker-config"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/noveo-docker-config" >> "$GITHUB_ENV"
+
       - name: Log in to build image registry.
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -102,16 +116,21 @@ jobs:
         run: zstd -dc "$RUNNER_TEMP/noveo-linux-image/image.tar.zst" | docker load
 
       - name: Check permission to rebuild missing environment.
-        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true' && !inputs.build_missing_environment
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true' && (!inputs.build_missing_environment || inputs.self_hosted)
         run: |
-          echo "::error::Neither the registry nor prepared image cache has this environment. Dependency rebuilding was disabled for this run."
+          echo "::error::The prepared build image is unavailable. Prepare it on a GitHub-hosted runner before using a self-hosted runner."
           exit 1
 
       - name: Compiler cache directory.
-        run: echo "CCACHE_DIR=$RUNNER_TEMP/.tdesktop-cache" >> "$GITHUB_ENV"
+        run: |
+          if [ '${{ inputs.self_hosted }}' = true ]; then
+            echo "CCACHE_DIR=$HOME/.cache/noveo-tdesktop-ccache" >> "$GITHUB_ENV"
+          else
+            echo "CCACHE_DIR=$RUNNER_TEMP/.tdesktop-cache" >> "$GITHUB_ENV"
+          fi
 
       - name: First set up.
-        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true' && !inputs.self_hosted
         run: |
           sudo apt update
           curl -sSL https://install.python-poetry.org | python3 -
@@ -122,7 +141,7 @@ jobs:
           rm -rf __pycache__
 
       - name: Free up some disk space.
-        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true'
+        if: steps.registry-image.outputs.available != 'true' && steps.cache-image.outputs.cache-hit != 'true' && !inputs.self_hosted
         uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6
         with:
           tool-cache: true
@@ -216,7 +235,7 @@ jobs:
 
       - name: Restore Telegram Desktop cache.
         id: cache-tdesktop
-        if: env.ONLY_CACHE == 'false'
+        if: env.ONLY_CACHE == 'false' && !inputs.self_hosted
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.CCACHE_DIR }}
@@ -253,7 +272,7 @@ jobs:
           docker run --rm \
           -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
-          -v ${{ env.CCACHE_DIR }}:/var/cache/ccache \
+          -v "${{ env.CCACHE_DIR }}:/var/cache/ccache" \
           -e CONFIG="$BUILD_CONFIGURATION" \
           -e KEEP_GOING=1 \
           -e CCACHE_SLOPPINESS=pch_defines,time_macros \
@@ -305,6 +324,10 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true' && env.BUILD_CONFIGURATION == 'Release'
         run: |
           if ! command -v xvfb-run >/dev/null; then
+            if [ '${{ inputs.self_hosted }}' = true ]; then
+              echo '::error::Install xvfb-run on the self-hosted runner before running release builds.'
+              exit 1
+            fi
             sudo apt-get update
             sudo apt-get install -y xvfb
           fi
@@ -367,6 +390,7 @@ jobs:
         if: >-
           !cancelled() && steps.ccache-stats.outcome == 'success'
           && github.ref_name == github.event.repository.default_branch
+          && !inputs.self_hosted
           && fromJSON(steps.ccache-stats.outputs.misses) > 0
         uses: actions/cache/save@v6
         with:

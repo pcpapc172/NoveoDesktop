@@ -103,6 +103,19 @@ jobs:
           sdk: ${{ env.SDK }}
           toolset: "14.44"
 
+      - name: Make room for release dependencies.
+        if: env.BUILD_CONFIGURATION == 'Release'
+        shell: pwsh
+        run: |
+          $paths = @('C:\Android', 'C:\Program Files\Android', 'C:\Program Files (x86)\Android', 'C:\hostedtoolcache\windows\Java_*')
+          foreach ($path in $paths) {
+            Get-Item -Path $path -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "Removing unused runner tool: $($_.FullName)"
+              Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Continue
+            }
+          }
+          Get-PSDrive -PSProvider FileSystem | Select-Object Name, Used, Free
+
       - name: NuGet sources.
         run: |
           nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
@@ -131,7 +144,7 @@ jobs:
           BUILD_SNAPSHOT_KEY=$(printf '%s\n' "$DEPENDENCY_KEY" "$TOOLCHAIN_KEY" | sha256sum | cut -d ' ' -f1)
           if [ "$BUILD_CONFIGURATION" = Release ]; then
             BUILD_SNAPSHOT_KEY="release-v1-$BUILD_SNAPSHOT_KEY"
-            echo "DEPENDENCY_VARIANT=deps-release-v1" >> "$GITHUB_ENV"
+            echo "DEPENDENCY_VARIANT=deps-release-v2" >> "$GITHUB_ENV"
             echo "OUT_CACHE_VARIANT=out-release-v1" >> "$GITHUB_ENV"
             echo "PREPARE_OPTIONS=silent" >> "$GITHUB_ENV"
           else
@@ -155,7 +168,7 @@ jobs:
         if: env.BUILD_CONFIGURATION == 'Release' && steps.registry-deps.outputs.available != 'true'
         run: |
           cd %TBUILD%\%REPO_NAME%
-          python .github\scripts\registry_cache.py pull --reference %REGISTRY_CACHE%:deps-release-partial-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
+          python .github\scripts\registry_cache.py pull --reference %REGISTRY_CACHE%:deps-release-partial-v2-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
 
       - name: Seed release dependencies from the existing Debug snapshot.
         id: registry-seed-deps
@@ -213,9 +226,22 @@ jobs:
 
       - name: Preserve partial release dependencies after preparation fails.
         if: ${{ !cancelled() && steps.libraries.outcome == 'failure' && env.BUILD_CONFIGURATION == 'Release' && github.ref == 'refs/heads/main' }}
+        shell: pwsh
+        env:
+          TEMP: ${{ runner.temp }}
+          TMP: ${{ runner.temp }}
         run: |
-          cd %TBUILD%\%REPO_NAME%
-          python .github\scripts\registry_cache.py push --reference %REGISTRY_CACHE%:deps-release-partial-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
+          $ErrorActionPreference = 'Stop'
+          Get-ChildItem -LiteralPath $env:LibrariesPath -Directory -Filter 'qt_*' | ForEach-Object {
+            $key = Join-Path (Join-Path $env:LibrariesPath 'cache_keys') $_.Name
+            if (!(Test-Path -LiteralPath $key)) {
+              Write-Host "Removing incomplete Qt build $($_.Name) before saving completed dependencies."
+              Remove-Item -LiteralPath $_.FullName -Recurse -Force
+            }
+          }
+          Set-Location (Join-Path $env:TBUILD $env:REPO_NAME)
+          python .github/scripts/registry_cache.py push --reference "${env:REGISTRY_CACHE}:deps-release-partial-v2-$env:DEPENDENCY_KEY" --key "$env:DEPENDENCY_KEY" --root "$env:TBUILD" --paths ThirdParty Libraries/win64
+          if ($LASTEXITCODE) { throw 'Saving partial release dependencies failed' }
 
       - name: Read configuration matrix.
         shell: bash
