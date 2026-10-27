@@ -1,8 +1,24 @@
-name: NoveoDesktop Linux Debug
+name: NoveoDesktop Linux
 
 on:
+  workflow_call:
+    inputs:
+      configuration:
+        type: string
+        default: Debug
+      environment_only:
+        type: boolean
+        default: false
+      build_missing_environment:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
+      configuration:
+        description: Application build configuration
+        type: choice
+        options: [Debug, Release]
+        default: Debug
       environment_only:
         description: Publish the build environment without building the app
         type: boolean
@@ -33,6 +49,7 @@ jobs:
           - ""
 
     env:
+      BUILD_CONFIGURATION: ${{ inputs.configuration || 'Debug' }}
       UPLOAD_ARTIFACT: ${{ inputs.environment_only && 'false' || 'true' }}
       ONLY_CACHE: ${{ inputs.environment_only && 'true' || 'false' }}
       IMAGE_TAG: tdesktop:centos_env
@@ -48,6 +65,11 @@ jobs:
           BUILD_ENV_HASH: ${{ hashFiles('Telegram/build/docker/centos_env/**') }}
         run: |
           echo "BUILD_ENV_KEY=$BUILD_ENV_HASH" >> "$GITHUB_ENV"
+          if [ "$BUILD_CONFIGURATION" = Release ]; then
+            echo "BUILD_CACHE_VARIANT=out-release-v1" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_CACHE_VARIANT=out-v1" >> "$GITHUB_ENV"
+          fi
           echo "REGISTRY_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-cache" >> "$GITHUB_ENV"
           echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}-linux-build:$BUILD_ENV_HASH" >> "$GITHUB_ENV"
 
@@ -176,7 +198,7 @@ jobs:
         if: env.ONLY_CACHE == 'false'
         run: >-
           python3 .github/scripts/registry_cache.py pull
-          --reference "$REGISTRY_CACHE:out-v1-$BUILD_ENV_KEY"
+          --reference "$REGISTRY_CACHE:$BUILD_CACHE_VARIANT-$BUILD_ENV_KEY"
           --key "$BUILD_ENV_KEY" --root "$PWD" --paths out --compression zstd
 
       - name: Restore incremental build.
@@ -185,8 +207,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: out
-          key: Linux-out-v1-${{ env.BUILD_ENV_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: Linux-out-v1-${{ env.BUILD_ENV_KEY }}-
+          key: Linux-${{ env.BUILD_CACHE_VARIANT }}-${{ env.BUILD_ENV_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: Linux-${{ env.BUILD_CACHE_VARIANT }}-${{ env.BUILD_ENV_KEY }}-
 
       - name: Restore unchanged input timestamps.
         if: env.ONLY_CACHE == 'false'
@@ -209,9 +231,19 @@ jobs:
           if [ -n "${{ matrix.defines }}" ]; then
             DEFINE="-D ${{ matrix.defines }}=ON"
             echo Define from matrix: $DEFINE
-            echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-Debug ${{ matrix.defines }}" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-$BUILD_CONFIGURATION ${{ matrix.defines }}" >> $GITHUB_ENV
           else
-            echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-Debug" >> $GITHUB_ENV
+            echo "ARTIFACT_NAME=NoveoDesktop-Linux-x64-$BUILD_CONFIGURATION" >> $GITHUB_ENV
+          fi
+
+          echo "ARTIFACT_PATH=$RUNNER_TEMP/noveo-linux-artifact" >> "$GITHUB_ENV"
+          if [ "$BUILD_CONFIGURATION" = Release ]; then
+            FLAGS=(-D 'CMAKE_C_FLAGS_RELEASE=-O2 -DNDEBUG -g0 -ffunction-sections -fdata-sections -fpch-preprocess'
+                   -D 'CMAKE_CXX_FLAGS_RELEASE=-O2 -DNDEBUG -g0 -ffunction-sections -fdata-sections -fpch-preprocess'
+                   -D 'CMAKE_EXE_LINKER_FLAGS_RELEASE=-Wl,--gc-sections')
+          else
+            FLAGS=(-D 'CMAKE_C_FLAGS_DEBUG=-O0 -fpch-preprocess'
+                   -D 'CMAKE_CXX_FLAGS_DEBUG=-O0 -fpch-preprocess')
           fi
 
           mkdir -p "$CCACHE_DIR"
@@ -222,14 +254,13 @@ jobs:
           -u $(id -u) \
           -v $PWD:/usr/src/tdesktop \
           -v ${{ env.CCACHE_DIR }}:/var/cache/ccache \
-          -e CONFIG=Debug \
+          -e CONFIG="$BUILD_CONFIGURATION" \
           -e KEEP_GOING=1 \
           -e CCACHE_SLOPPINESS=pch_defines,time_macros \
           $IMAGE_TAG \
           env -u CCACHE_DISABLE /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
-          -D CMAKE_CONFIGURATION_TYPES=Debug \
-          -D CMAKE_C_FLAGS_DEBUG="-O0 -fpch-preprocess" \
-          -D CMAKE_CXX_FLAGS_DEBUG="-O0 -fpch-preprocess" \
+          -D CMAKE_CONFIGURATION_TYPES="$BUILD_CONFIGURATION" \
+          "${FLAGS[@]}" \
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON \
           -D TDESKTOP_API_TEST=ON \
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF \
@@ -239,7 +270,7 @@ jobs:
       - name: Check.
         if: env.ONLY_CACHE == 'false'
         run: |
-          filePath="out/Debug/Telegram"
+          filePath="out/$BUILD_CONFIGURATION/Telegram"
           if test -f "$filePath"; then
             echo "Build successfully done! :)"
 
@@ -253,7 +284,7 @@ jobs:
       - name: Stage Linux binaries.
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          cd out/Debug
+          cd "out/$BUILD_CONFIGURATION"
           mkdir -p "$RUNNER_TEMP/noveo-linux-artifact"
           cp {Telegram,Updater} "$RUNNER_TEMP/noveo-linux-artifact/"
 
@@ -270,13 +301,41 @@ jobs:
             /artifact/Updater
           ls -lh "$RUNNER_TEMP/noveo-linux-artifact/"{Telegram,Updater}
 
+      - name: Smoke test the stripped Linux release.
+        if: env.UPLOAD_ARTIFACT == 'true' && env.BUILD_CONFIGURATION == 'Release'
+        run: |
+          if ! command -v xvfb-run >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y xvfb
+          fi
+          mkdir -p "$RUNNER_TEMP/noveo-release-smoke"
+          status=0
+          xvfb-run -a timeout --kill-after=3s 15s \
+            "$RUNNER_TEMP/noveo-linux-artifact/Telegram" -many \
+            -workdir "$RUNNER_TEMP/noveo-release-smoke" \
+            > "$RUNNER_TEMP/noveo-release-smoke-output.log" 2>&1 || status=$?
+          if [ "$status" -ne 124 ]; then
+            cat "$RUNNER_TEMP/noveo-release-smoke-output.log"
+            echo "::error::Linux release exited during startup (status $status)."
+            exit 1
+          fi
+          echo 'Linux release remained running during the startup smoke test.'
+
+      - name: Package optimized release.
+        if: env.UPLOAD_ARTIFACT == 'true' && env.BUILD_CONFIGURATION == 'Release'
+        run: |
+          python3 .github/scripts/package_release.py --platform linux \
+            --input "$RUNNER_TEMP/noveo-linux-artifact" \
+            --output "$RUNNER_TEMP/noveo-linux-packages" --name "$ARTIFACT_NAME"
+          echo "ARTIFACT_PATH=$RUNNER_TEMP/noveo-linux-packages" >> "$GITHUB_ENV"
+
       - uses: actions/upload-artifact@v7
         if: env.UPLOAD_ARTIFACT == 'true'
         name: Upload artifact.
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ runner.temp }}/noveo-linux-artifact/
-          compression-level: 1
+          path: ${{ env.ARTIFACT_PATH }}
+          compression-level: ${{ env.BUILD_CONFIGURATION == 'Release' && '0' || '1' }}
           retention-days: 14
           if-no-files-found: error
 
@@ -292,7 +351,7 @@ jobs:
           && (steps.inputs.outputs.changed == 'true' || steps.registry-build.outputs.available != 'true')
         run: >-
           python3 .github/scripts/registry_cache.py push
-          --reference "$REGISTRY_CACHE:out-v1-$BUILD_ENV_KEY"
+          --reference "$REGISTRY_CACHE:$BUILD_CACHE_VARIANT-$BUILD_ENV_KEY"
           --key "$BUILD_ENV_KEY" --root "$PWD" --paths out --compression zstd
 
       - name: Compiler cache statistics.

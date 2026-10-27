@@ -1,0 +1,51 @@
+import hashlib
+import importlib.util
+from pathlib import Path
+import tarfile
+import tempfile
+import unittest
+import zipfile
+
+spec = importlib.util.spec_from_file_location('package_release', Path(__file__).with_name('package_release.py'))
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+
+class PackageReleaseTest(unittest.TestCase):
+    def test_archives_preserve_files_and_verify_checksums(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for platform, names in (('linux', ('Telegram', 'Updater')), ('windows', ('Telegram.exe', 'Updater.exe'))):
+                source, output = root / platform, root / (platform + '-out')
+                source.mkdir()
+                for index, name in enumerate(names):
+                    path = source / name
+                    path.write_bytes(bytes([index + 1]) * 1024)
+                    path.chmod(0o755)
+                archive = module.package(platform, source, output, platform)
+                checksum, filename = (output / (archive.name + '.sha256')).read_text().split()
+                self.assertEqual(filename, archive.name)
+                self.assertEqual(checksum, hashlib.sha256(archive.read_bytes()).hexdigest())
+                if platform == 'linux':
+                    with tarfile.open(archive, 'r:xz') as bundle:
+                        self.assertEqual(set(bundle.getnames()), set(names))
+                        for name in names:
+                            self.assertEqual(bundle.extractfile(name).read(), (source / name).read_bytes())
+                            self.assertTrue(bundle.getmember(name).mode & 0o111)
+                else:
+                    with zipfile.ZipFile(archive) as bundle:
+                        self.assertEqual(set(bundle.namelist()), set(names))
+                        for name in names:
+                            self.assertEqual(bundle.read(name), (source / name).read_bytes())
+
+    def test_missing_or_empty_binary_fails_without_publishing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'Telegram').write_bytes(b'')
+            with self.assertRaises(ValueError):
+                module.package('linux', root, root / 'out', 'invalid')
+            self.assertFalse((root / 'out').exists())
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -1,8 +1,24 @@
-name: NoveoDesktop Windows Debug
+name: NoveoDesktop Windows
 
 on:
+  workflow_call:
+    inputs:
+      configuration:
+        type: string
+        default: Debug
+      environment_only:
+        type: boolean
+        default: false
+      build_missing_environment:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
+      configuration:
+        description: Application build configuration
+        type: choice
+        options: [Debug, Release]
+        default: Debug
       environment_only:
         description: Prepare and publish dependencies without building the app
         type: boolean
@@ -34,6 +50,7 @@ jobs:
         generator: ["Ninja Multi-Config"]
 
     env:
+      BUILD_CONFIGURATION: ${{ inputs.configuration || 'Debug' }}
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: ${{ inputs.environment_only && 'true' || 'false' }}
       PREPARE_PATH: "Telegram/build/prepare/prepare.py"
@@ -112,6 +129,16 @@ jobs:
           TOOLCHAIN_KEY=$(printf '%s\n' "$VCToolsVersion" "$(cmake --version)" | sha256sum | cut -d ' ' -f1)
           DEPENDENCY_KEY=$(printf '%s\n' "v1" "$CACHE_KEY" "$VCToolsVersion" "${{ matrix.arch }}" "${{ matrix.qt }}" | sha256sum | cut -d ' ' -f1)
           BUILD_SNAPSHOT_KEY=$(printf '%s\n' "$DEPENDENCY_KEY" "$TOOLCHAIN_KEY" | sha256sum | cut -d ' ' -f1)
+          if [ "$BUILD_CONFIGURATION" = Release ]; then
+            BUILD_SNAPSHOT_KEY="release-v1-$BUILD_SNAPSHOT_KEY"
+            echo "DEPENDENCY_VARIANT=deps-release-v1" >> "$GITHUB_ENV"
+            echo "OUT_CACHE_VARIANT=out-release-v1" >> "$GITHUB_ENV"
+            echo "PREPARE_OPTIONS=silent" >> "$GITHUB_ENV"
+          else
+            echo "DEPENDENCY_VARIANT=deps" >> "$GITHUB_ENV"
+            echo "OUT_CACHE_VARIANT=out-v1" >> "$GITHUB_ENV"
+            echo "PREPARE_OPTIONS=skip-release silent" >> "$GITHUB_ENV"
+          fi
           echo "BUILD_SNAPSHOT_KEY=$BUILD_SNAPSHOT_KEY" >> "$GITHUB_ENV"
           echo "DEPENDENCY_KEY=$DEPENDENCY_KEY" >> "$GITHUB_ENV"
           echo "REGISTRY_CACHE=ghcr.io/${GITHUB_REPOSITORY,,}-windows-cache" >> "$GITHUB_ENV"
@@ -121,10 +148,17 @@ jobs:
         id: registry-deps
         run: |
           cd %TBUILD%\%REPO_NAME%
+          python .github\scripts\registry_cache.py pull --reference %REGISTRY_CACHE%:%DEPENDENCY_VARIANT%-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
+
+      - name: Seed release dependencies from the existing Debug snapshot.
+        id: registry-seed-deps
+        if: env.BUILD_CONFIGURATION == 'Release' && steps.registry-deps.outputs.available != 'true'
+        run: |
+          cd %TBUILD%\%REPO_NAME%
           python .github\scripts\registry_cache.py pull --reference %REGISTRY_CACHE%:deps-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
 
       - name: ThirdParty cache.
-        if: steps.registry-deps.outputs.available != 'true'
+        if: steps.registry-deps.outputs.available != 'true' && steps.registry-seed-deps.outputs.available != 'true'
         id: cache-third-party
         uses: actions/cache/restore@v6
         with:
@@ -133,7 +167,7 @@ jobs:
           restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
 
       - name: Libraries cache.
-        if: steps.registry-deps.outputs.available != 'true'
+        if: steps.registry-deps.outputs.available != 'true' && steps.registry-seed-deps.outputs.available != 'true'
         id: cache-libs
         uses: actions/cache/restore@v6
         with:
@@ -147,7 +181,7 @@ jobs:
           restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-
 
       - name: Qt cache.
-        if: steps.registry-deps.outputs.available != 'true'
+        if: steps.registry-deps.outputs.available != 'true' && steps.registry-seed-deps.outputs.available != 'true'
         id: cache-qt
         uses: actions/cache/restore@v6
         with:
@@ -158,19 +192,19 @@ jobs:
           restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-
 
       - name: Require explicit cold build.
-        if: steps.registry-deps.outputs.available != 'true' && !(steps.cache-third-party.outputs.cache-hit == 'true' && steps.cache-libs.outputs.cache-hit == 'true' && steps.cache-qt.outputs.cache-hit == 'true') && !inputs.build_missing_environment
+        if: steps.registry-deps.outputs.available != 'true' && steps.registry-seed-deps.outputs.available != 'true' && !(steps.cache-third-party.outputs.cache-hit == 'true' && steps.cache-libs.outputs.cache-hit == 'true' && steps.cache-qt.outputs.cache-hit == 'true') && !inputs.build_missing_environment
         shell: pwsh
         run: throw 'Windows dependencies are missing. Run once with build_missing_environment enabled to publish a durable snapshot.'
 
       - name: Libraries.
         id: libraries
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }}
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat %PREPARE_OPTIONS% ${{ matrix.qt }}
 
       - name: Read configuration matrix.
         shell: bash
         run: |
-          ARTIFACT_NAME="NoveoDesktop-Windows-Debug"
+          ARTIFACT_NAME="NoveoDesktop-Windows-$BUILD_CONFIGURATION"
 
           ARCH=""
           if [ -n "${{ matrix.arch }}" ]; then
@@ -216,7 +250,7 @@ jobs:
         if: steps.registry-deps.outputs.available != 'true' && github.ref == 'refs/heads/main'
         run: |
           cd %TBUILD%\%REPO_NAME%
-          python .github\scripts\registry_cache.py push --reference %REGISTRY_CACHE%:deps-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
+          python .github\scripts\registry_cache.py push --reference %REGISTRY_CACHE%:%DEPENDENCY_VARIANT%-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
 
       - name: Preserve ThirdParty if registry publication fails.
         if: ${{ !cancelled() && steps.libraries.outcome == 'success' && steps.publish-deps.outcome == 'failure' && steps.cache-third-party.outputs.cache-hit != 'true' }}
@@ -262,8 +296,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}\out
-          key: Windows-x64-out-v1-${{ env.CACHE_KEY }}-${{ env.TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: Windows-x64-out-v1-${{ env.CACHE_KEY }}-${{ env.TOOLCHAIN_KEY }}-
+          key: Windows-x64-${{ env.OUT_CACHE_VARIANT }}-${{ env.CACHE_KEY }}-${{ env.TOOLCHAIN_KEY }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: Windows-x64-${{ env.OUT_CACHE_VARIANT }}-${{ env.CACHE_KEY }}-${{ env.TOOLCHAIN_KEY }}-
 
       - name: Restore unchanged input timestamps.
         if: env.ONLY_CACHE == 'false'
@@ -277,28 +311,33 @@ jobs:
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram
 
+          set "RELEASE_FLAGS="
+          if "%BUILD_CONFIGURATION%"=="Release" set RELEASE_FLAGS=-D CMAKE_C_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Gy /Gw" -D CMAKE_CXX_FLAGS_RELEASE="/O2 /Ob2 /DNDEBUG /Gy /Gw" -D CMAKE_EXE_LINKER_FLAGS_RELEASE="/OPT:REF /OPT:ICF /INCREMENTAL:NO /DEBUG:NONE"
           call configure.bat ^
           %TDESKTOP_BUILD_GENERATOR% ^
           %TDESKTOP_BUILD_ARCH% ^
           ${{ matrix.qt }} ^
           %TDESKTOP_BUILD_API% ^
-          -D CMAKE_CONFIGURATION_TYPES=Debug ^
+          -D CMAKE_CONFIGURATION_TYPES=%BUILD_CONFIGURATION% ^
+          %RELEASE_FLAGS% ^
           -D CMAKE_COMPILE_WARNING_AS_ERROR=ON ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D CMAKE_C_COMPILER_LAUNCHER=sccache ^
           -D CMAKE_CXX_COMPILER_LAUNCHER=sccache ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
+          if errorlevel 1 exit /b %errorlevel%
 
-          cmake --build ..\out --config Debug --parallel -- -k 0
+          cmake --build ..\out --config %BUILD_CONFIGURATION% --parallel -- -k 0
 
       - name: Stage Windows binaries.
         if: env.ONLY_CACHE == 'false' && ((env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly'))
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $buildOutput = Join-Path (Join-Path $env:TBUILD $env:REPO_NAME) 'out\Debug'
+          $buildOutput = Join-Path (Join-Path $env:TBUILD $env:REPO_NAME) "out\$env:BUILD_CONFIGURATION"
           $artifactDirectory = Join-Path $env:GITHUB_WORKSPACE 'artifact'
+          "ARTIFACT_PATH=$artifactDirectory" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
           foreach ($binary in @('Telegram.exe', 'Updater.exe')) {
             $source = Join-Path $buildOutput $binary
@@ -307,13 +346,22 @@ jobs:
             }
             Copy-Item -LiteralPath $source -Destination $artifactDirectory -Force
           }
+      - name: Package optimized release.
+        if: env.ONLY_CACHE == 'false' && env.BUILD_CONFIGURATION == 'Release'
+        shell: pwsh
+        run: |
+          $sourceDirectory = Join-Path $env:TBUILD $env:REPO_NAME
+          $packages = Join-Path $env:GITHUB_WORKSPACE 'packages'
+          python "$sourceDirectory/.github/scripts/package_release.py" --platform windows --input "$env:ARTIFACT_PATH" --output "$packages" --name 'NoveoDesktop-Windows-x64-Release'
+          if ($LASTEXITCODE) { throw 'Release packaging failed' }
+          "ARTIFACT_PATH=$packages" >> $env:GITHUB_ENV
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         if: env.ONLY_CACHE == 'false' && ((env.UPLOAD_ARTIFACT == 'true') || (github.ref == 'refs/heads/nightly'))
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ github.workspace }}/artifact/
-          compression-level: 1
+          path: ${{ env.ARTIFACT_PATH }}
+          compression-level: ${{ env.BUILD_CONFIGURATION == 'Release' && '0' || '1' }}
           retention-days: 14
           if-no-files-found: error
 

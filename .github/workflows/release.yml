@@ -1,0 +1,69 @@
+name: NoveoDesktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag
+        type: string
+        default: v1.0.0
+      build_missing_environment:
+        description: Allow rebuilding dependencies if the prepared environment is missing
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
+
+concurrency:
+  group: noveo-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    uses: ./.github/workflows/linux.yml
+    with:
+      configuration: Release
+      build_missing_environment: ${{ inputs.build_missing_environment }}
+
+  windows:
+    uses: ./.github/workflows/win.yml
+    with:
+      configuration: Release
+      build_missing_environment: ${{ inputs.build_missing_environment }}
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release packages.
+        uses: actions/download-artifact@v4
+        with:
+          pattern: NoveoDesktop-*-Release*
+          path: packages
+          merge-multiple: true
+
+      - name: Verify release packages.
+        run: |
+          cd packages
+          sha256sum --check -- *.sha256
+          test -f NoveoDesktop-Linux-x64-Release.tar.xz
+          test -f NoveoDesktop-Windows-x64-Release.zip
+
+      - name: Publish GitHub release.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Use a tag such as v1.0.0.'
+            exit 1
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Optimized Noveo Desktop builds for Linux and Windows. Each archive includes the application and updater; SHA-256 files are provided for verification.
+          NOTES
+          gh release create "$RELEASE_TAG" packages/* \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Noveo Desktop $RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
