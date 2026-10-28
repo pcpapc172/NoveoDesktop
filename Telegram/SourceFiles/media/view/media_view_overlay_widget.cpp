@@ -132,6 +132,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QPainterPathStroker>
 #include <QtGui/QWindow>
 #include <QtGui/QScreen>
+#ifdef Q_OS_WIN
+#include <QOpenGLWidget>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+#include <QRhiWidget>
+#endif // Qt >= 6.7
+#endif // Q_OS_WIN
 
 #include <kurlmimedata.h>
 
@@ -1037,6 +1043,46 @@ void OverlayWidget::orderWidgets() {
 }
 
 void OverlayWidget::setupWindow() {
+#ifdef Q_OS_WIN
+	// A newly exposed translucent Windows window can be composed before the
+	// media surface presents its first frame. Keep its backing store dark
+	// until presentation, then restore the normal translucent background.
+	const auto waitingForFrame = lifetime().make_state<bool>(false);
+	const auto framePresented = [=] {
+		if (!*waitingForFrame) {
+			return;
+		}
+		*waitingForFrame = false;
+		_body->setAutoFillBackground(false);
+	};
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+	if (const auto rhi = qobject_cast<QRhiWidget*>(_widget.get())) {
+		QObject::connect(rhi, &QRhiWidget::frameSubmitted,
+			_widget.get(), framePresented);
+	} else
+#endif // Qt >= 6.7
+	if (const auto gl = qobject_cast<QOpenGLWidget*>(_widget.get())) {
+		QObject::connect(gl, &QOpenGLWidget::frameSwapped,
+			_widget.get(), framePresented);
+	} else {
+		_surface->paintRequest() | rpl::on_next(framePresented, lifetime());
+	}
+	_window->shownValue() | rpl::on_next([=](bool shown) {
+		*waitingForFrame = shown;
+		if (shown) {
+			auto color = (_fullScreenVideo
+				? st::mediaviewVideoBg
+				: st::mediaviewBg)->c;
+			color.setAlpha(255);
+			auto palette = _window->palette();
+			palette.setColor(QPalette::Window, color);
+			_window->setPalette(palette);
+			_body->setPalette(palette);
+			_widget->setPalette(palette);
+		}
+		_body->setAutoFillBackground(shown);
+	}, lifetime());
+#endif // Q_OS_WIN
 	_window->setBodyTitleArea([=](QPoint widgetPoint) {
 		using Flag = Ui::WindowTitleHitTestFlag;
 		Ui::WindowTitleHitTestFlags result;
@@ -4980,7 +5026,11 @@ void OverlayWidget::showAndActivate() {
 		_window->showMaximized();
 	}
 	_helper->afterShow(_fullscreen);
+#ifdef Q_OS_WIN
+	Ui::ForceFullRepaintSync(_window);
+#else // Q_OS_WIN
 	_widget->update();
+#endif // !Q_OS_WIN
 	activate();
 }
 
