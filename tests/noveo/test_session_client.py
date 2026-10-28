@@ -42,7 +42,7 @@ async def main():
                   "messages": [message("m1", 1700000001), message("m2", 1700000002)]},
                  {"chatId": "group-chat", "chatType": "group", "chatName": "Group", "members": ["test-user", "other-user"],
                   "messages": [message("g1", 1700000003)]},
-                 {"chatId": "channel-chat", "chatType": "channel", "chatName": "Channel",
+                 {"chatId": "channel-chat", "type": "channel", "chatName": "Channel",
                   "messages": [message("c1", 1700000004)]}]
         chats[1]["messages"].append(message("gift-history", 1700000005, text="[gift](fixture-gift)"))
         async def gifts(request):

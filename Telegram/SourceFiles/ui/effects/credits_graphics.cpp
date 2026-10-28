@@ -249,14 +249,27 @@ PaintRoundImageCallback GenerateCreditsPaintUserpicCallback(
 		case Data::CreditsHistoryEntry::PeerType::Ads:
 			return { st::historyPeer6UserpicBg, st::historyPeer6UserpicBg2 };
 		case Data::CreditsHistoryEntry::PeerType::Unsupported:
-			return {
-				st::historyPeerArchiveUserpicBg,
-				st::historyPeerArchiveUserpicBg,
-			};
+			return EmptyUserpic::UserpicColor(
+				entry.in ? st::colorIndexGreen : st::colorIndexRed);
 		}
 		Unexpected("Unknown peer type.");
 	}();
 	const auto userpic = std::make_shared<EmptyUserpic>(bg, QString());
+	if (entry.peerType == PeerType::Unsupported) {
+		const auto incoming = entry.in;
+		return [=](Painter &p, int x, int y, int outer, int size) {
+			userpic->paintCircle(p, x, y, outer, size);
+			const auto hq = PainterHighQualityEnabler(p);
+			p.setPen(QPen(st::historyPeerUserpicFg, std::max(1., size / 14.),
+				Qt::SolidLine, Qt::RoundCap));
+			const auto center = QPointF(x + size / 2., y + size / 2.);
+			const auto half = size * .22;
+			p.drawLine(center - QPointF(half, 0), center + QPointF(half, 0));
+			if (incoming) {
+				p.drawLine(center - QPointF(0, half), center + QPointF(0, half));
+			}
+		};
+	}
 	if (entry.peerType == PeerType::API) {
 		const auto svg = std::make_shared<QSvgRenderer>(Ui::Premium::Svg());
 		const auto image = std::make_shared<QImage>();

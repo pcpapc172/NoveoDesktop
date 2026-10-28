@@ -60,6 +60,11 @@ int main(int argc, char **argv) {
 			Assert(data.vdialogs().v.size() == 3);
 			Assert(data.vchats().v.size() == 2);
 			Assert(data.vmessages().v.size() == 3);
+			const auto channelId = qint64(Noveo::NativeUserId("channel-chat").bare);
+			const auto channel = std::find_if(data.vchats().v.begin(), data.vchats().v.end(), [&](const auto &chat) {
+				return chat.type() == mtpc_channel && chat.c_channel().vid().v == channelId;
+			});
+			Assert(channel != data.vchats().v.end());
 			request(10,
 				MTPusers_GetFullUser(
 					MTP_inputUser(MTP_long(Noveo::NativeUserId("other-user").bare), MTP_long(1))));

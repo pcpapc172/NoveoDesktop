@@ -20,6 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 
 #include <QtCore/QCoreApplication>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QPainter>
+#include <QtSvg/QSvgRenderer>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QSystemTrayIcon>
 
@@ -53,6 +56,7 @@ private:
 	struct State {
 		QIcon systemIcon;
 		QString iconThemeName;
+		QColor foreground;
 		bool monochrome = false;
 		int32 counter = 0;
 		bool muted = false;
@@ -80,28 +84,6 @@ IconGraphic::IconGraphic()
 IconGraphic::~IconGraphic() = default;
 
 QIcon IconGraphic::systemIcon() const {
-	if (_new.iconThemeName == _current.iconThemeName
-		&& _new.monochrome == _current.monochrome
-		&& (_new.counter > 0) == (_current.counter > 0)
-		&& _new.muted == _current.muted) {
-		return _current.systemIcon;
-	}
-
-	const auto candidates = {
-		_new.monochrome ? PanelIconName(_new.counter, _new.muted) : QString(),
-		ApplicationIconName(),
-	};
-
-	for (const auto &candidate : candidates) {
-		if (candidate.isEmpty()) {
-			continue;
-		}
-		const auto icon = QIcon::fromTheme(candidate, QIcon());
-		if (icon.name() == candidate) {
-			return icon;
-		}
-	}
-
 	return QIcon();
 }
 
@@ -124,6 +106,7 @@ QSize IconGraphic::dprSize(const QImage &image) const {
 void IconGraphic::updateState() {
 	_new.iconThemeName = QIcon::themeName();
 	_new.monochrome = Core::App().settings().trayIconMonochrome();
+	_new.foreground = QGuiApplication::palette().color(QPalette::WindowText);
 	_new.counter = Core::App().unreadBadge();
 	_new.muted = Core::App().unreadBadgeMuted();
 	_new.systemIcon = systemIcon();
@@ -131,6 +114,8 @@ void IconGraphic::updateState() {
 
 bool IconGraphic::isRefreshNeeded() const {
 	return _trayIcon.isNull()
+		|| _new.monochrome != _current.monochrome
+		|| (_new.monochrome && _new.foreground != _current.foreground)
 		|| _new.iconThemeName != _current.iconThemeName
 		|| _new.systemIcon.name() != _current.systemIcon.name()
 		|| (isCounterNeeded(_new)
@@ -149,17 +134,14 @@ QIcon IconGraphic::trayIcon() {
 		_current = _new;
 	});
 
-	if (!isCounterNeeded(_new)) {
-		_trayIcon = _new.systemIcon;
-		return _trayIcon;
-	}
-
 	QIcon result;
 	for (const auto iconSize : _iconSizes) {
 		auto &currentImageBack = _imageBack[iconSize];
 		const auto desiredSize = QSize(iconSize, iconSize);
 
 		if (currentImageBack.isNull()
+			|| _new.monochrome != _current.monochrome
+			|| (_new.monochrome && _new.foreground != _current.foreground)
 			|| _new.iconThemeName != _current.iconThemeName
 			|| _new.systemIcon.name() != _current.systemIcon.name()) {
 			currentImageBack = {};
@@ -193,7 +175,16 @@ QIcon IconGraphic::trayIcon() {
 			}
 
 			if (currentImageBack.isNull()) {
-				currentImageBack = Window::Logo();
+				currentImageBack = QImage(desiredSize, QImage::Format_ARGB32_Premultiplied);
+				currentImageBack.fill(Qt::transparent);
+				auto painter = QPainter(&currentImageBack);
+				QSvgRenderer(_new.monochrome
+					? u":/gui/icons/tray/monochrome.svg"_q
+					: u":/gui/icons/tray/colored.svg"_q).render(&painter);
+				if (_new.monochrome) {
+					painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+					painter.fillRect(currentImageBack.rect(), _new.foreground);
+				}
 			}
 
 			if (dprSize(currentImageBack) != desiredSize) {
@@ -257,6 +248,8 @@ rpl::producer<> TrayEventFilter::contextMenuFilters() const {
 }
 
 Tray::Tray() {
+	base::qt_signal_producer(qApp, &QGuiApplication::paletteChanged
+	) | rpl::on_next([=] { updateIcon(); }, _lifetime);
 	auto connection = Gio::bus_get_sync(Gio::BusType::SESSION_, nullptr);
 	if (connection) {
 		_sniWatcher = std::make_unique<base::Platform::DBus::ServiceWatcher>(
@@ -415,10 +408,7 @@ rpl::lifetime &Tray::lifetime() {
 Tray::~Tray() = default;
 
 bool HasMonochromeSetting() {
-	return QIcon::hasThemeIcon(
-		PanelIconName(
-			Core::App().unreadBadge(),
-			Core::App().unreadBadgeMuted()));
+	return true;
 }
 
 } // namespace Platform

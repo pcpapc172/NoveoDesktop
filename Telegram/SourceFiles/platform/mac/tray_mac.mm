@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/platform/mac/base_utilities_mac.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "core/sandbox.h"
 #include "core/version.h"
 #include "window/window_controller.h"
@@ -19,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtWidgets/QMenu>
 #include <QtGui/QIcon>
+#include <QtSvg/QSvgRenderer>
 
 #import <AppKit/NSMenu.h>
 #import <AppKit/NSStatusItem.h>
@@ -95,13 +97,20 @@ namespace {
 }
 
 [[nodiscard]] QImage TrayIconBack(bool darkMode) {
-	static const auto WithColor = [](QColor color) {
-		return st::macTrayIcon.instance(color, 100);
-	};
-	static const auto DarkModeResult = WithColor({ 255, 255, 255 });
-	static const auto LightModeResult = WithColor({ 0, 0, 0, 180 });
-	auto result = darkMode ? DarkModeResult : LightModeResult;
-	result.detach();
+	const auto monochrome = Core::App().settings().trayIconMonochrome();
+	const auto side = 22 * style::DevicePixelRatio();
+	auto result = QImage(side, side, QImage::Format_ARGB32_Premultiplied);
+	result.fill(Qt::transparent);
+	{
+		auto painter = QPainter(&result);
+		QSvgRenderer(monochrome ? u":/gui/icons/tray/monochrome.svg"_q
+			: u":/gui/icons/tray/colored.svg"_q).render(&painter);
+		if (monochrome) {
+			painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+			painter.fillRect(result.rect(), darkMode ? QColor(255, 255, 255) : QColor(0, 0, 0, 180));
+		}
+	}
+	result.setDevicePixelRatio(style::DevicePixelRatio());
 	return result;
 }
 

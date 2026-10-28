@@ -144,6 +144,16 @@ int main(int argc, char **argv) {
 			const auto result = Decode<MTPmessages_Messages>(body);
 			Assert(result.c_messages_messagesSlice().vmessages().v.size() == 1);
 			Assert(qs(result.c_messages_messagesSlice().vmessages().v.front().c_message().vmessage()) == "needle older");
+			Assert(result.c_messages_messagesSlice().vcount().v == 2);
+			const auto before = result.c_messages_messagesSlice().vmessages().v.front().c_message().vid().v;
+			request(120, MTPmessages_Search(MTP_flags(MTPmessages_Search::Flags()), peer, MTP_string("needle"), MTPInputPeer(), MTPInputPeer(), MTPVector<MTPReaction>(), MTPint(), MTP_inputMessagesFilterEmpty(), MTP_int(0), MTP_int(0), MTP_int(before), MTP_int(0), MTP_int(50), MTP_int(0), MTP_int(0), MTP_long(0)));
+		} else if (id == 120) {
+			const auto result = Decode<MTPmessages_Messages>(body);
+			Assert(qs(result.c_messages_messagesSlice().vmessages().v.front().c_message().vmessage()) == "needle oldest");
+			request(121, MTPmessages_Search(MTP_flags(MTPmessages_Search::Flags()), peer, MTP_string(""), MTPInputPeer(), MTPInputPeer(), MTPVector<MTPReaction>(), MTPint(), MTP_inputMessagesFilterUrl(), MTP_int(0), MTP_int(0), MTP_int(0), MTP_int(0), MTP_int(50), MTP_int(0), MTP_int(0), MTP_long(0)));
+		} else if (id == 121) {
+			const auto result = Decode<MTPmessages_Messages>(body);
+			Assert(qs(result.c_messages_messagesSlice().vmessages().v.front().c_message().vmessage()) == "https://example.com");
 			request(21, MTPmessages_SearchGlobal(MTP_flags(MTPmessages_SearchGlobal::Flag::f_groups_only), MTPint(), MTPInputChannel(), MTP_string("needle"), MTP_inputMessagesFilterEmpty(), MTP_int(0), MTP_int(0), MTP_int(0), MTP_inputPeerEmpty(), MTP_int(0), MTP_int(50)));
 		} else if (id == 21) {
 			Assert(Decode<MTPmessages_Messages>(body).c_messages_messagesSlice().vmessages().v.size() == 1);
@@ -180,6 +190,10 @@ int main(int argc, char **argv) {
 			request(29, MTPcontacts_Search(MTP_flags(MTPcontacts_Search::Flags()), MTP_string("publicgroup"), MTP_int(20)));
 		} else if (id == 29) {
 			Decode<MTPcontacts_Found>(body);
+			request(129, MTPcontacts_ResolveUsername(MTP_flags(MTPcontacts_ResolveUsername::Flags()), MTP_string("u_private"), MTPstring()));
+		} else if (id == 129) {
+			const auto resolved = Decode<MTPcontacts_ResolvedPeer>(body);
+			Assert(resolved.c_contacts_resolvedPeer().vpeer().c_peerUser().vuser_id().v == Noveo::NativeUserId("other-user").bare);
 			const auto group = peerFromChat(Noveo::NativeUserId("public-group").bare);
 			Assert(client.needsJoin(group));
 			client.joinChat(group, [&](QString error) {
@@ -193,7 +207,16 @@ int main(int argc, char **argv) {
 			Decode<MTPUpdates>(body);
 			request(32, MTPmessages_EditChatAbout(peer, MTP_string("Changed description")));
 		} else if (id == 32) {
-			Assert(Decode<MTPBool>(body).type() == mtpc_boolTrue); app.exit(0);
+			Assert(Decode<MTPBool>(body).type() == mtpc_boolTrue);
+			request(33, MTPmessages_GetCommonChats(MTP_inputUser(MTP_long(Noveo::NativeUserId("other-user").bare), MTP_long(1)), MTP_long(0), MTP_int(50)));
+		} else if (id == 33) {
+			const auto result = Decode<MTPmessages_Chats>(body);
+			const auto &chats = result.c_messages_chats().vchats().v;
+			Assert(std::any_of(chats.cbegin(), chats.cend(), [](const MTPChat &chat) {
+				return chat.type() == mtpc_chat && chat.c_chat().vid().v == Noveo::NativeUserId("group").bare;
+			}));
+			Assert(std::none_of(chats.cbegin(), chats.cend(), [](const MTPChat &chat) { return chat.type() == mtpc_channel; }));
+			app.exit(0);
 		} else Assert(false);
 	};
 	auth.onMessage = [&](QJsonObject frame) { client.message(frame); };

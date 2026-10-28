@@ -103,11 +103,14 @@ int main(int argc, char **argv) {
 			if (id == 2) {
 				Assert(
 					history.size() == 1 && qs(history[0].data().vid()) == "in");
+				Assert(history[0].data().vpeer().type() == mtpc_starsTransactionPeer);
+				Assert(data.vusers().v.size() == 1);
 				Assert(qs(*data.vnext_offset()) == "1");
 				transactions(3, 1, "1", 1);
 			} else if (id == 3) {
 				Assert(history.size() == 1
 					   && qs(history[0].data().vid()) == "tiny");
+				Assert(history[0].data().vpeer().type() == mtpc_starsTransactionPeerUnsupported);
 				Assert(history[0].data().vamount().c_starsAmount().vnanos().v
 					   == 10000000);
 				transactions(4, 2, {}, 50);

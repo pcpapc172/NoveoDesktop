@@ -4544,6 +4544,29 @@ void HistoryItem::detectTextLinks(
 }
 
 void HistoryItem::setText(TextWithEntities textWithEntities) {
+	if (_history->session().account().noveoApi()) {
+		const auto detected = TextUtilities::ParseEntities(
+			textWithEntities.text,
+			TextParseLinks | TextParseMentions | TextParseHashtags | TextParseBotCommands);
+		for (const auto &entity : detected.entities) {
+			const auto blocked = std::any_of(
+				textWithEntities.entities.begin(),
+				textWithEntities.entities.end(),
+				[&](const EntityInText &existing) {
+					const auto type = existing.type();
+					const auto formatting = type == EntityType::Bold
+						|| type == EntityType::Italic || type == EntityType::Underline
+						|| type == EntityType::StrikeOut || type == EntityType::Spoiler;
+					return !formatting && existing.offset() < entity.offset() + entity.length()
+						&& entity.offset() < existing.offset() + existing.length();
+				});
+			if (!blocked) textWithEntities.entities.push_back(entity);
+		}
+		std::stable_sort(textWithEntities.entities.begin(), textWithEntities.entities.end(),
+			[](const EntityInText &a, const EntityInText &b) {
+				return a.offset() != b.offset() ? a.offset() < b.offset() : a.length() > b.length();
+			});
+	}
 	detectTextLinks(textWithEntities);
 	setTextValue((_media && _media->consumeMessageText(textWithEntities))
 		? TextWithEntities()

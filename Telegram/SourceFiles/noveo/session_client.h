@@ -184,6 +184,7 @@ private:
 	MTPmessages_Messages messagePage(PeerId peer, QVector<MTPMessage> messages, int count = -1) const;
 	MTPMessageMedia pollMedia(const QJsonObject &poll, const QString &messageId) const;
 	MTPChat nativeChat(const QJsonObject &profile);
+	QVector<MTPChat> commonChats(uint64 userId) const;
 	MTPChatFull fullChat(PeerId peer, const QJsonObject &profile);
 	void chatAction(mtpRequestId id, PeerId peer, QString action, QJsonObject extra = {}, bool booleanReply = false);
 	bool mediaRequest(mtpRequestId id, const mtpBuffer &body);

@@ -113,7 +113,10 @@ async def main():
             assert part.name == "file" and part.filename == "avatar.png" and (await part.read()).startswith(b"\x89PNG"); observed["avatar"] += 1
             return web.json_response({"success": True, "url": f"https://localhost:{port}/avatar.png"})
         async def public_search(request):
-            authorize(request); assert request.query["q"] == "publicgroup"
+            authorize(request)
+            if request.query["q"] == "u_private":
+                return web.json_response({"success": True, "results": [{"resultType": "user", "userId": "other-user", "username": "Other", "privateHandle": "@u_private"}]})
+            assert request.query["q"] == "publicgroup"
             public = {"chatId": "public-group", "chatType": "group", "ownerId": "other-user", "chatName": "Public group", "isMember": False, "members": ["other-user"], "resultType": "chat"}; chats.append(public)
             return web.json_response({"success": True, "results": [public]})
         async def websocket(request):
@@ -149,8 +152,18 @@ async def main():
                     expected_token = "rotated-token"
                     await ws.send_json({"type": "password_changed", "success": True, "token": expected_token, "sessionId": "rotated"})
                 elif kind == "search_chat_messages":
-                    assert frame["query"] == "needle"; observed["search"] += 1
-                    await ws.send_json({"type": "chat_message_search_results", "chatId": frame["chatId"], "requestId": frame["requestId"], "messages": [message("search-result", "needle older", 1699999980)] if frame["chatId"] == "group" else []})
+                    assert frame["query"] in ("needle", ""); observed["search"] += 1
+                    if frame.get("searchVersion") == 2:
+                        older = frame.get("beforeMessageId") == "search-result"
+                        assert frame.get("beforeMessageId") in (None, "search-result")
+                        if frame.get("mediaKind"):
+                            assert frame["mediaKind"] == "links"
+                            result = message("search-link", "https://example.com", 1699999960)
+                        else:
+                            result = message("search-oldest", "needle oldest", 1699999970) if older else message("search-result", "needle older", 1699999980)
+                        await ws.send_json({"type": "chat_message_search_results", "chatId": frame["chatId"], "requestId": frame["requestId"], "searchVersion": 2, "total": 2, "messages": [result]})
+                    else:
+                        await ws.send_json({"type": "chat_message_search_results", "chatId": frame["chatId"], "requestId": frame["requestId"], "messages": [message("search-result", "needle older", 1699999980)] if frame["chatId"] == "group" else []})
                 elif kind == "update_profile":
                     assert frame["username"] == "New name" and frame["bio"] == "New bio"
                     await ws.send_json({"type": "user_updated", "userId": "other-user", "username": "Unrelated"})
@@ -201,7 +214,7 @@ async def main():
         try:
             proc = await asyncio.create_subprocess_exec(str(binary), f"https://localhost:{port}", str(cert))
             code = await proc.wait(); assert code == 0, code
-            assert observed == {"edit": 2, "vote": 1, "context": 1, "delete": 1, "privacy": 1, "revoke": 1, "rotated_http": 1, "search": 4, "member_save": 1, "contact_add": 1, "contact_remove": 2, "create_group": 1, "create_channel": 1, "avatar": 1, "join": 1, "leave": 1, "chat_profile": 3}, observed
+            assert observed == {"edit": 2, "vote": 1, "context": 1, "delete": 1, "privacy": 1, "revoke": 1, "rotated_http": 1, "search": 6, "member_save": 1, "contact_add": 1, "contact_remove": 2, "create_group": 1, "create_channel": 1, "avatar": 1, "join": 1, "leave": 1, "chat_profile": 3}, observed
             print("PASS permissions, unloaded replies, acknowledged edits/deletes, denied edit rollback, exact poll option IDs, pinning, members, sessions, privacy, password token rotation, safe group history rejection, chat/global search, member overrides, contact batches, profile edits, group/channel creation, multipart avatar upload, and group join/leave")
         finally: await runner.cleanup()
 

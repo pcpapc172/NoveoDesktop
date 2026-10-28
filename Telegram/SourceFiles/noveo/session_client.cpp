@@ -966,6 +966,19 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 			content = parsed.object();
 		}
 	}
+	const auto topicCreated = content.toObject().value("forumTopicCreated").toObject();
+	if (!topicCreated.isEmpty()) {
+		const auto emoji = topicCreated.value("iconEmojiId").toString().toLongLong();
+		const auto actionFlags = emoji ? MTPDmessageActionTopicCreate::Flag::f_icon_emoji_id
+			: MTPDmessageActionTopicCreate::Flags();
+		const auto serviceFlags = MTPDmessageService::Flag::f_from_id
+			| (sender == _self ? MTPDmessageService::Flag::f_out : MTPDmessageService::Flag());
+		return MTP_messageService(MTP_flags(serviceFlags), MTP_int(id),
+			MTP_peerUser(MTP_long(senderId.bare)), peerToMTP(peer), MTPPeer(),
+			MTPMessageReplyHeader(), MTP_int(Date(object)),
+			MTP_messageActionTopicCreate(MTP_flags(actionFlags), MTP_string(Text(topicCreated.value("title"))),
+				MTP_int(topicCreated.value("iconColor").toInt()), MTP_long(emoji)), MTPMessageReactions(), MTPint());
+	}
 	const auto callLog = content.toObject().value("callLog").toObject();
 	if (peerIsUser(peer) && !callLog.isEmpty()) {
 		const auto caller = Text(callLog.value("startedByUserId"));
@@ -2983,7 +2996,7 @@ void SessionClient::drain() {
 				MTP_peerSettings(MTP_flags(MTPDpeerSettings::Flags()), MTPint(), MTPstring(),
 					MTPint(), MTPlong(), MTPstring(), MTPlong(), MTPstring(), MTPstring(), MTPint(),
 					MTPint()),
-				MTPPhoto(), photo, MTPPhoto(), notify(peerFromUser(uid)), MTPBotInfo(), MTPint(), MTPint(),
+				MTPPhoto(), photo, MTPPhoto(), notify(peerFromUser(uid)), MTPBotInfo(), MTPint(), MTP_int(commonChats(uid).size()),
 				MTPint(), MTPint(), MTPChatTheme(), MTPstring(), MTPChatAdminRights(),
 				MTPChatAdminRights(), MTPWallPaper(), MTPPeerStories(), MTPBusinessWorkHours(),
 				MTPBusinessLocation(), MTPBusinessGreetingMessage(), MTPBusinessAwayMessage(),

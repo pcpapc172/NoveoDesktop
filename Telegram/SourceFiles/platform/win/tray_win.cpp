@@ -126,13 +126,14 @@ bool DarkTasbarValueValid/* = false*/;
 		} else if (monochrome && darkMode) {
 			return MonochromeIconFor(args.size, *darkMode);
 		}
-		return scaled.emplace(
-			args.size,
-			(smallIcon
-				? Window::LogoNoMargin()
-				: Window::Logo()
-			).scaledToWidth(args.size, Qt::SmoothTransformation)
-		).first->second;
+		if (smallIcon) {
+			auto image = QImage(args.size, args.size, QImage::Format_ARGB32_Premultiplied);
+			image.fill(Qt::transparent);
+			auto painter = QPainter(&image);
+			QSvgRenderer(u":/gui/icons/tray/colored.svg"_q).render(&painter);
+			return scaled.emplace(args.size, std::move(image)).first->second;
+		}
+		return scaled.emplace(args.size, Window::Logo().scaledToWidth(args.size, Qt::SmoothTransformation)).first->second;
 	}();
 	if ((!monochrome || !darkMode) && supportMode) {
 		Window::ConvertIconToBlack(result);

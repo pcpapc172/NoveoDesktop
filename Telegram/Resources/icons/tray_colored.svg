@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="40 35 176 185" role="img" aria-label="Original blue ribbon logo, fully vectorized with all color faces and circles">
+  <title>Blue ribbon logo</title>
+  <desc>Fully colored editable vector reconstruction with distinct blue ribbon faces, gradients, and two complete filled circles. No embedded images.</desc>
+  <defs>
+    <linearGradient id="upper" x1="53" y1="56" x2="121" y2="98" gradientUnits="userSpaceOnUse"><stop stop-color="#2168aa"/><stop offset="0.5" stop-color="#2064a3"/><stop offset="1" stop-color="#1c5b92"/></linearGradient>
+    <linearGradient id="left" x1="52" y1="89" x2="92" y2="168" gradientUnits="userSpaceOnUse"><stop stop-color="#104477"/><stop offset="1" stop-color="#164f88"/></linearGradient>
+    <linearGradient id="leftBottom" x1="51" y1="130" x2="97" y2="180" gradientUnits="userSpaceOnUse"><stop stop-color="#2d83c7"/><stop offset="1" stop-color="#2672b7"/></linearGradient>
+    <linearGradient id="center" x1="100" y1="80" x2="155" y2="174" gradientUnits="userSpaceOnUse"><stop stop-color="#092e5b"/><stop offset="0.65" stop-color="#0e416f"/><stop offset="1" stop-color="#164f7c"/></linearGradient>
+    <linearGradient id="rightTop" x1="168" y1="79" x2="204" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#2878b9"/><stop offset="0.48" stop-color="#2069a9"/><stop offset="1" stop-color="#17538b"/></linearGradient>
+    <linearGradient id="bottom" x1="153" y1="151" x2="199" y2="200" gradientUnits="userSpaceOnUse"><stop stop-color="#0d3b70"/><stop offset="1" stop-color="#0b3a68"/></linearGradient>
+    <linearGradient id="lowerDot" x1="53" y1="182" x2="85" y2="214" gradientUnits="userSpaceOnUse"><stop stop-color="#104374"/><stop offset="1" stop-color="#154b82"/></linearGradient>
+    
+    <clipPath id="bodyClip"><path d="M 50 89 C 50 70, 65 55, 83.5 55.5 C 97.5 55.2, 107.2 62.8, 115.7 77.8 L 162.5 134.5 Q 167.6 141.8, 167.6 133.9 L 167.6 76.3 L 196.5 102.3 C 203 108, 206 113.5, 206 120.5 L 206 162 C 206 181.3, 191.1 195.8, 174 196.2 C 160.1 196.2, 150.8 190, 140.3 177.6 L 98 118.5 Q 92.8 110.9, 90 118.9 L 90 187.5 L 62 164.9 C 53.3 157.9, 50 152.3, 50 144 Z"/></clipPath>
+  </defs>
+  <!-- All ribbon surfaces are independent, fully filled, editable vector paths. -->
+  <g clip-path="url(#bodyClip)" stroke="none">
+    <!-- Base right/lower face -->
+    <path d="M 50 89 C 50 70, 65 55, 83.5 55.5 C 97.5 55.2, 107.2 62.8, 115.7 77.8 L 162.5 134.5 Q 167.6 141.8, 167.6 133.9 L 167.6 76.3 L 196.5 102.3 C 203 108, 206 113.5, 206 120.5 L 206 162 C 206 181.3, 191.1 195.8, 174 196.2 C 160.1 196.2, 150.8 190, 140.3 177.6 L 98 118.5 Q 92.8 110.9, 90 118.9 L 90 187.5 L 62 164.9 C 53.3 157.9, 50 152.3, 50 144 Z" fill="url(#bottom)"/>
+    <!-- Upper arched face -->
+    <path fill="url(#upper)" d="M49 90 C50 70 64.5 55.2 83.5 55.5 C97 55.3 107.8 63.9 115.8 78.5 C100.7 77.1 94.4 89 93.4 101.8 Q91.8 109.6 94.2 116.8 C78.9 97.3 68.5 84.9 49 90 Z"/>
+    <!-- Left descending face -->
+    <path fill="url(#left)" d="M49.6 89.1 C68.6 85.4 81.2 96.5 94.2 116.4 L91 169.2 L50 130.1 Z"/>
+    <!-- Lower/forward face of the left stroke -->
+    <path fill="url(#leftBottom)" d="M49.5 128.3 L90.2 165.8 L91.3 189 L59.8 164.1 C52.1 157.5 49.4 150.7 49.5 143.9 Z"/>
+    <!-- Right upright, upper/lighter surface -->
+    <path fill="url(#rightTop)" d="M167.3 75.7 L197 102.7 C203.4 108.6 206.3 113.9 206.3 120.1 L206.3 164 C196.5 169.5 184.1 163.3 176.1 153.4 L167.5 138.2 Z"/>
+    <!-- Lower curved ribbon and underside -->
+    <path fill="url(#bottom)" d="M166.9 135.4 C177.9 150.6 190.9 164.6 206.4 163.3 L206.4 168 C202.1 190.4 188.6 197.8 173.2 197.3 C157.5 196.9 148.3 188 139.2 177.2 L129 164.5 C142.2 179.8 153.2 176.1 162.2 162.4 Q168.7 151.1 166.9 135.4 Z"/>
+    <!-- Front diagonal band, including its rounded turn into the lower face -->
+    <path fill="url(#center)" d="M115.6 78.6 L168.6 137.4 L168.3 150.7 C168.2 162.1 158.8 171.5 147.7 173.3 C142.9 174.2 139.3 173.8 135.4 169.1 L94.3 116.9 C92.3 110.3 92.4 100.9 95.7 92.4 C100.1 82.1 106.7 78 115.6 78.6 Z"/>
+  </g>
+  <!-- Complete, solid vector dots -->
+  <circle cx="185.5" cy="56.4" r="19.1" fill="#3a93d9"/>
+  <circle cx="68.8" cy="198.4" r="17.7" fill="url(#lowerDot)"/>
+</svg>

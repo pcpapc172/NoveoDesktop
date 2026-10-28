@@ -220,6 +220,26 @@ MTPmessages_Messages SessionClient::messagePage(PeerId, QVector<MTPMessage> mess
 		MTP_vector<MTPMessage>(messages), MTP_vector<MTPForumTopic>({}), MTP_vector<MTPChat>(_chats.values().toVector()), MTP_vector<MTPUser>(_users.values().toVector()));
 }
 
+QVector<MTPChat> SessionClient::commonChats(uint64 userId) const {
+	auto result = QVector<MTPChat>();
+	const auto raw = _rawUsers.value(userId);
+	if (raw.isEmpty() || raw == _self) return result;
+	for (auto i = _chatProfiles.cbegin(); i != _chatProfiles.cend(); ++i) {
+		const auto peer = PeerId(i.key());
+		if (!peerIsChat(peer) || !_dialogs.contains(peer.value) || !_chats.contains(peer.value)) continue;
+		const auto members = i.value().value("members").toArray();
+		auto selfMember = false;
+		auto targetMember = false;
+		for (const auto member : members) {
+			const auto id = RawMember(member);
+			selfMember |= id == _self;
+			targetMember |= id == raw;
+		}
+		if (selfMember && targetMember) result.push_back(_chats.value(peer.value));
+	}
+	return result;
+}
+
 MTPMessageMedia SessionClient::pollMedia(const QJsonObject &source, const QString &uuid) const {
 	const auto options = source.value("options").toArray();
 	if (options.size() < 2) return MTP_messageMediaEmpty();
@@ -272,7 +292,14 @@ MTPChat SessionClient::nativeChat(const QJsonObject &incoming) {
 	auto profile = incoming;
 	const auto raw = profile.value("chatId").toString(profile.value("id").toString());
 	const auto id = NativeUserId(raw).bare;
-	const auto channel = profile.value("chatType").toString() == "channel";
+	auto type = profile.value("chatType").toString().toLower();
+	if (type.isEmpty()) type = profile.value("type").toString().toLower();
+	if (type != "group" && type != "channel") {
+		const auto known = _chatPeers.value(raw);
+		if (known) type = peerIsChannel(known) ? "channel" : "group";
+	}
+	const auto channel = (type == "channel");
+	if (type == "group" || channel) profile.insert("chatType", type);
 	const auto peer = channel ? peerFromChannel(ChannelId(id)) : peerFromChat(ChatId(id));
 	auto merged = _chatProfiles.value(peer.value);
 	for (auto i = profile.begin(); i != profile.end(); ++i) merged.insert(i.key(), i.value());
@@ -497,6 +524,28 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 	const auto channelPeer = [](const MTPInputChannel &c) { return c.type() == mtpc_inputChannel ? peerFromChannel(ChannelId(c.c_inputChannel().vchannel_id().v)) : PeerId(); };
 	const auto userId = [=, this](const MTPInputUser &u) { return u.type() == mtpc_inputUserSelf ? NativeUserId(_self).bare : u.type() == mtpc_inputUser ? uint64(u.c_inputUser().vuser_id().v) : uint64(0); };
 	switch (type) {
+	case mtpc_messages_getCommonChats: {
+		if (!_auth->authenticated() || !_historyReady) return true;
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		auto input = MTPInputUser();
+		auto maxId = MTPlong();
+		auto limit = MTPint();
+		if (!input.read(from, end) || !maxId.read(from, end) || !limit.read(from, end) || from != end) return bad();
+		const auto uid = userId(input);
+		if (!_rawUsers.contains(uid)) return bad("NOVEO_PEER_UNKNOWN");
+		auto chats = commonChats(uid);
+		if (maxId.v) {
+			const auto i = std::find_if(chats.cbegin(), chats.cend(), [&](const MTPChat &chat) {
+				return chat.type() == mtpc_chat && chat.c_chat().vid().v == maxId.v;
+			});
+			chats = i == chats.cend() ? QVector<MTPChat>() : chats.mid(int(i - chats.cbegin()) + 1);
+		}
+		chats = chats.mid(0, std::clamp(limit.v, 1, 100));
+		_pending.remove(id);
+		reply(id, MTPmessages_Chats(MTP_messages_chats(MTP_vector<MTPChat>(chats))));
+		return true;
+	}
 	case mtpc_messages_editMessage: {
 		if (!_auth->authenticated()) return true;
 		const auto parsed = ReadRequest<mtpc_messages_editMessage>(body);
@@ -631,13 +680,46 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		const auto &r = *parsed;
 		const auto peer = inputPeer(r.peer); const auto chat = _chatIds.value(peer.value);
 		if (chat.isEmpty()) return bad("NOVEO_PEER_UNKNOWN");
-		if (r.filter.type() != mtpc_inputMessagesFilterEmpty) return bad("NOVEO_SEARCH_FILTER_UNSUPPORTED");
-		wire(id, {{{"type", "search_chat_messages"}, {"chatId", chat}, {"query", String(r.q)}, {"requestId", QString::number(id)}}}, {"chat_message_search_results"}, [=, this](QJsonObject frame) {
+		const auto mediaKind = [&]() -> QString {
+			switch (r.filter.type()) {
+			case mtpc_inputMessagesFilterEmpty: return {};
+			case mtpc_inputMessagesFilterPhotos: return "photos";
+			case mtpc_inputMessagesFilterVideo: return "videos";
+			case mtpc_inputMessagesFilterPhotoVideo: return "photos_videos";
+			case mtpc_inputMessagesFilterDocument: return "files";
+			case mtpc_inputMessagesFilterUrl: return "links";
+			case mtpc_inputMessagesFilterGif: return "gifs";
+			case mtpc_inputMessagesFilterVoice: return "voice";
+			case mtpc_inputMessagesFilterMusic: return "music";
+			case mtpc_inputMessagesFilterPoll: return "polls";
+			default: return "unsupported";
+			}
+		}();
+		if (mediaKind == "unsupported") return bad("NOVEO_SEARCH_FILTER_UNSUPPORTED");
+		auto search = QJsonObject{{"type", "search_chat_messages"}, {"chatId", chat},
+			{"query", String(r.q)}, {"requestId", QString::number(id)}, {"searchVersion", 2},
+			{"limit", std::clamp(r.limit.v + std::max(0, r.add_offset.v), 1, 100)},
+			{"minDate", r.min_date.v}, {"maxDate", r.max_date.v}};
+		if (!mediaKind.isEmpty()) search.insert("mediaKind", mediaKind);
+		if (r.offset_id.v) {
+			const auto raw = _rawMessages.value(r.offset_id.v);
+			if (raw.isEmpty()) return bad("NOVEO_MESSAGE_UNKNOWN");
+			search.insert("beforeMessageId", raw);
+		}
+		if (r.flags.v & 1) {
+			const auto raw = _rawUsers.value(inputPeer(r.from_id).value);
+			if (raw.isEmpty()) return bad("NOVEO_PEER_UNKNOWN");
+			search.insert("fromUserId", raw);
+		}
+		wire(id, {search}, {"chat_message_search_results"}, [=, this](QJsonObject frame) {
+			if (frame.contains("error")) { fail(id, "NOVEO_SEARCH_FAILED"); return; }
 			cacheMessages(peer, frame.value("messages").toArray());
 			auto messages = QVector<MTPMessage>();
 			for (const auto value : frame.value("messages").toArray()) messages.push_back(nativeMessage(value.toObject(), peer));
-			const auto count = messages.size();
-			if (r.offset_id.v) messages.erase(std::remove_if(messages.begin(), messages.end(), [=](const MTPMessage &m) { return (m.type() == mtpc_message ? m.c_message().vid().v : m.c_messageService().vid().v) >= r.offset_id.v; }), messages.end());
+			const auto serverPaged = frame.value("searchVersion").toInt() == 2;
+			if (!serverPaged && !mediaKind.isEmpty()) { fail(id, "NOVEO_SEARCH_FILTER_UNSUPPORTED"); return; }
+			const auto count = serverPaged ? frame.value("total").toInt() : messages.size();
+			if (!serverPaged && r.offset_id.v) messages.erase(std::remove_if(messages.begin(), messages.end(), [=](const MTPMessage &m) { return (m.type() == mtpc_message ? m.c_message().vid().v : m.c_messageService().vid().v) >= r.offset_id.v; }), messages.end());
 			messages.erase(std::remove_if(messages.begin(), messages.end(), [=, this](const MTPMessage &m) {
 				if (m.type() != mtpc_message) return r.filter.type() != mtpc_inputMessagesFilterEmpty;
 				const auto &data = m.c_message();
@@ -693,8 +775,9 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 				if (item.value("resultType").toString() == "chat") {
 					const auto known = _chatPeers.value(item.value("chatId").toString(item.value("id").toString()));
 					item.insert("previewOnly", !item.value("isMember").toBool(_dialogs.contains(known.value))); const auto chat = nativeChat(item); chats.push_back(chat);
-					_chats[(item.value("chatType").toString() == "channel" ? peerFromChannel(ChannelId(NativeUserId(item.value("chatId").toString()).bare)) : peerFromChat(ChatId(NativeUserId(item.value("chatId").toString()).bare))).value] = chat;
-					peers.push_back(item.value("chatType").toString() == "channel" ? MTPPeer(MTP_peerChannel(MTP_long(NativeUserId(item.value("chatId").toString()).bare))) : MTPPeer(MTP_peerChat(MTP_long(NativeUserId(item.value("chatId").toString()).bare))));
+					const auto peer = _chatPeers.value(item.value("chatId").toString(item.value("id").toString()));
+					_chats[peer.value] = chat;
+					peers.push_back(peerToMTP(peer));
 				} else {
 					const auto u = user(item, false); users.push_back(u); _users[u.c_user().vid().v] = u;
 					peers.push_back(MTP_peerUser(u.c_user().vid()));
@@ -714,12 +797,16 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 			auto peers = QVector<MTPPeer>(); auto users = QVector<MTPUser>(); auto chats = QVector<MTPChat>();
 			for (const auto value : response.value("results").toArray()) {
 				auto item = value.toObject();
-				if (item.value("handle").toString().remove('@').compare(query, Qt::CaseInsensitive) != 0) continue;
+				const auto publicHandle = item.value("handle").toString().remove('@');
+				const auto privateHandle = item.value("privateHandle").toString().remove('@');
+				if (publicHandle.compare(query, Qt::CaseInsensitive) != 0
+					&& privateHandle.compare(query, Qt::CaseInsensitive) != 0) continue;
 				if (item.value("resultType").toString() == "chat") {
 					const auto known = _chatPeers.value(item.value("chatId").toString(item.value("id").toString()));
 					item.insert("previewOnly", !item.value("isMember").toBool(_dialogs.contains(known.value))); const auto chat = nativeChat(item); chats.push_back(chat);
-					_chats[(item.value("chatType").toString() == "channel" ? peerFromChannel(ChannelId(NativeUserId(item.value("chatId").toString()).bare)) : peerFromChat(ChatId(NativeUserId(item.value("chatId").toString()).bare))).value] = chat;
-					peers.push_back(item.value("chatType").toString() == "channel" ? MTPPeer(MTP_peerChannel(MTP_long(NativeUserId(item.value("chatId").toString()).bare))) : MTPPeer(MTP_peerChat(MTP_long(NativeUserId(item.value("chatId").toString()).bare))));
+					const auto peer = _chatPeers.value(item.value("chatId").toString(item.value("id").toString()));
+					_chats[peer.value] = chat;
+					peers.push_back(peerToMTP(peer));
 				} else {
 					const auto u = user(item, false); users.push_back(u); _users[u.c_user().vid().v] = u;
 					peers.push_back(MTP_peerUser(u.c_user().vid()));

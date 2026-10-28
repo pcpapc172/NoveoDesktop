@@ -41,7 +41,7 @@ async def main():
         seen = {"wallet": 0, "assets": 0, "customization": 0, "giveaway": 0, "rejected": 0, "receipts": 0}
         socket = None
         wallet = {"balanceTenths": 12345, "transactions": [
-            {"transactionId": "in", "amountTenths": 150, "createdAt": 1700000010, "description": "Received Stars"},
+            {"transactionId": "in", "amountTenths": 150, "createdAt": 1700000010, "description": "Received Stars", "relatedUserId": "other"},
             {"transactionId": "out", "amountTenths": -25, "createdAt": 1700000009, "description": "Gift purchase"},
             {"transactionId": "tiny", "amountTenths": 1, "createdAt": 1700000008, "description": "Fractional credit"},
             {"transactionId": "reward", "amountTenths": 1, "createdAt": 1700000007, "type": "message_reward"},

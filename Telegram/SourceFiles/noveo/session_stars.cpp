@@ -134,6 +134,8 @@ MTPpayments_StarsStatus SessionClient::starsStatus(const QJsonObject &wallet,
 			return (flags & 4) ? date(a) < date(b) : date(a) > date(b);
 		});
 	auto history = QVector<MTPStarsTransaction>();
+	auto historyUsers = QVector<MTPUser>();
+	auto includedUsers = QSet<uint64>();
 	const auto end = std::min(qsizetype(offset) + limit, transactions.size());
 	for (auto index = qsizetype(offset); index < end; ++index) {
 		const auto &tx = transactions[index];
@@ -145,6 +147,16 @@ MTPpayments_StarsStatus SessionClient::starsStatus(const QJsonObject &wallet,
 		if (title.isEmpty() || title == "null") {
 			title = tx.value("type").toString();
 		}
+		const auto rawUserId = tx.value("relatedUserId").toString();
+		const auto userId = rawUserId.isEmpty() ? 0 : NativeUserId(rawUserId).bare;
+		auto transactionPeer = MTP_starsTransactionPeerUnsupported();
+		if (userId && _users.contains(userId)) {
+			transactionPeer = MTP_starsTransactionPeer(MTP_peerUser(MTP_long(userId)));
+			if (!includedUsers.contains(userId)) {
+				includedUsers.insert(userId);
+				historyUsers.push_back(_users.value(userId));
+			}
+		}
 		history.push_back(MTP_starsTransaction(
 			MTP_flags(title.isEmpty()
 						  ? MTPDstarsTransaction::Flags()
@@ -153,7 +165,7 @@ MTPpayments_StarsStatus SessionClient::starsStatus(const QJsonObject &wallet,
 			MTP_string(tx.value("transactionId").toString()),
 			StarsAmount(tx.value("amountTenths").toInteger()),
 			MTP_int(int(std::clamp(date, qint64(0), qint64(INT_MAX)))),
-			MTP_starsTransactionPeerUnsupported(),
+			transactionPeer,
 			MTP_string(title),
 			MTPstring(),
 			MTPWebDocument(),
@@ -187,7 +199,7 @@ MTPpayments_StarsStatus SessionClient::starsStatus(const QJsonObject &wallet,
 		MTP_vector<MTPStarsTransaction>(history),
 		MTP_string(QString::number(end)),
 		MTPVector<MTPChat>(),
-		MTPVector<MTPUser>());
+		MTP_vector<MTPUser>(historyUsers));
 }
 
 bool SessionClient::economyRequest(mtpRequestId id, const mtpBuffer &body) {
