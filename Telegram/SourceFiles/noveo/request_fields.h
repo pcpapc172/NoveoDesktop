@@ -7,6 +7,30 @@
 namespace Noveo {
 template <mtpTypeId Type> struct RequestFields;
 
+template <> struct RequestFields<mtpc_messages_getHistory> {
+	MTPInputPeer peer;
+	MTPint offset_id;
+	MTPint offset_date;
+	MTPint add_offset;
+	MTPint limit;
+	MTPint max_id;
+	MTPint min_id;
+	MTPlong hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& offset_id.read(from, end)
+			&& offset_date.read(from, end)
+			&& add_offset.read(from, end)
+			&& limit.read(from, end)
+			&& max_id.read(from, end)
+			&& min_id.read(from, end)
+			&& hash.read(from, end)
+			&& from == end;
+	}
+};
+
 template <> struct RequestFields<mtpc_help_getPeerProfileColors> {
 	MTPint hash;
 	bool read(const mtpBuffer &body) {

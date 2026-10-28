@@ -240,6 +240,7 @@ private:
 	QMap<mtpRequestId, PeerId> _historyRequests;
 	QSet<mtpRequestId> _historyAnswered;
 	QSet<uint64> _historyExhausted;
+	int _serverHistoryVersion = 0;
 	QMap<uint64, MTPUser> _users;
 	QMap<uint64, QJsonObject> _profiles;
 	QSet<uint64> _fullProfiles;

@@ -578,6 +578,7 @@ void SessionClient::reset() {
 	_historyRequests.clear();
 	_historyAnswered.clear();
 	_historyExhausted.clear();
+	_serverHistoryVersion = 0;
 	_users.clear();
 	_profiles.clear();
 	_fullProfiles.clear();
@@ -931,7 +932,14 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		return MTP_messageEmpty(
 			MTP_flags(MTPDmessageEmpty::Flags()), MTP_int(0), MTPPeer(peerToMTP(peer)));
 	}
-	auto id = _messageIds.value(raw);
+	const auto serverId = object.value("serverMessageId").toInt();
+	auto id = (serverId > 1 && serverId < 0x3FFFFFFF) ? serverId : _messageIds.value(raw);
+	if (id && serverId == id) {
+		const auto previous = _messageIds.value(raw);
+		if (previous && previous != id) _rawMessages.remove(previous);
+		_messageIds[raw] = id;
+		_rawMessages[id] = raw;
+	}
 	if (!id) {
 		const auto known = _messages.value(peer.value);
 		const auto older = !known.isEmpty() && Date(object) < MessageDate(known.front());
@@ -1022,7 +1030,8 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		}
 	}
 	if (!replyRaw.isEmpty() && !_messageIds.contains(replyRaw)) {
-		const auto parentId = --_olderMessage;
+		const auto serverParent = object.value("replyToServerMessageId").toInt();
+		const auto parentId = serverParent > 1 && serverParent < 0x3FFFFFFF ? serverParent : --_olderMessage;
 		_messageIds[replyRaw] = parentId;
 		_rawMessages[parentId] = replyRaw;
 	}
@@ -1250,7 +1259,8 @@ void SessionClient::history(const QJsonArray &chats) {
 					raw = Text(row.value("id"));
 				}
 				if (!raw.isEmpty() && !_messageIds.contains(raw)) {
-					const auto id = ++_nextMessage;
+					const auto serverId = row.value("serverMessageId").toInt();
+					const auto id = serverId > 1 && serverId < 0x3FFFFFFF ? serverId : ++_nextMessage;
 					_messageIds[raw] = id;
 					_rawMessages[id] = raw;
 				}
@@ -1336,6 +1346,7 @@ void SessionClient::message(const QJsonObject &frame) {
 	}
 	wireEvent(frame);
 	const auto type = frame.value("type").toString();
+	if (type == "chat_history") _serverHistoryVersion = frame.value("historyVersion").toInt();
 	if (frame.value("activeVoiceChats").isObject()) {
 		_voiceState = frame.value("activeVoiceChats").toObject();
 		if (type != "voice_chat_update" && onVoiceEvent) onVoiceEvent({

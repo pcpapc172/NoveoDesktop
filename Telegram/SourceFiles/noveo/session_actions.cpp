@@ -524,6 +524,26 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 	const auto channelPeer = [](const MTPInputChannel &c) { return c.type() == mtpc_inputChannel ? peerFromChannel(ChannelId(c.c_inputChannel().vchannel_id().v)) : PeerId(); };
 	const auto userId = [=, this](const MTPInputUser &u) { return u.type() == mtpc_inputUserSelf ? NativeUserId(_self).bare : u.type() == mtpc_inputUser ? uint64(u.c_inputUser().vuser_id().v) : uint64(0); };
 	switch (type) {
+	case mtpc_messages_getHistory: {
+		if (_serverHistoryVersion != 2) return false;
+		if (!_auth->authenticated() || !_historyReady) return true;
+		const auto parsed = ReadRequest<mtpc_messages_getHistory>(body);
+		if (!parsed) return bad();
+		const auto &r = *parsed;
+		const auto peer = inputPeer(r.peer);
+		const auto chat = _chatIds.value(peer.value);
+		if (chat.isEmpty()) return bad("NOVEO_PEER_UNKNOWN");
+		wire(id, {{{"type", "load_history_page"}, {"chatId", chat}, {"requestId", QString::number(id)},
+			{"limit", std::clamp(r.limit.v, 1, 100)}, {"offsetId", r.offset_id.v},
+			{"offsetDate", r.offset_date.v}, {"addOffset", r.add_offset.v}}}, {"history_page"}, [=, this](QJsonObject frame) {
+			if (frame.contains("error")) { fail(id, "NOVEO_HISTORY_FAILED"); return; }
+			cacheMessages(peer, frame.value("messages").toArray());
+			auto messages = QVector<MTPMessage>();
+			for (const auto value : frame.value("messages").toArray()) messages.push_back(nativeMessage(value.toObject(), peer));
+			reply(id, messagePage(peer, std::move(messages), frame.value("count").toInt()));
+		});
+		return true;
+	}
 	case mtpc_messages_getCommonChats: {
 		if (!_auth->authenticated() || !_historyReady) return true;
 		auto from = body.constData() + 1;
