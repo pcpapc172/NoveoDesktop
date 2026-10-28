@@ -76,6 +76,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation', choices=['pull', 'push'])
     parser.add_argument('--reference', required=True)
+    parser.add_argument('--fallback-reference')
     parser.add_argument('--key', required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--paths', nargs='+', required=True)
@@ -89,8 +90,12 @@ def main():
         archive_name = 'snapshot.tar.zst' if args.compression == 'zstd' else 'snapshot.tar.gz'
         archive_path = temporary / archive_name
         if args.operation == 'pull':
+            selected_reference = args.reference
             result = subprocess.run(['oras', 'resolve', args.reference],
                                     capture_output=True, text=True)
+            if result.returncode and args.fallback_reference:
+                selected_reference = args.fallback_reference
+                result = subprocess.run(['oras', 'resolve', selected_reference], capture_output=True, text=True)
             if result.returncode:
                 print(f'::notice::Registry snapshot unavailable: {result.stderr.strip()}')
                 output(False)
@@ -98,7 +103,7 @@ def main():
             digest = result.stdout.strip()
             if not digest.startswith('sha256:') or len(digest) != 71:
                 raise ValueError('Registry returned an invalid digest')
-            reference = args.reference.rsplit(':', 1)[0] + '@' + digest
+            reference = selected_reference.rsplit(':', 1)[0] + '@' + digest
             subprocess.run(['oras', 'pull', reference, '-o', directory], check=True)
             if json.loads((temporary / 'snapshot.json').read_text()) != metadata:
                 raise ValueError('Snapshot identity does not match this build')

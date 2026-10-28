@@ -16,6 +16,9 @@ spec.loader.exec_module(cache)
 
 
 class RegistryCacheTest(unittest.TestCase):
+    def test_fallback_snapshot_preserves_incremental_build(self):
+        self.snapshot_round_trip('gzip', fallback=True)
+
     def test_snapshot_round_trip_preserves_incremental_build(self):
         self.snapshot_round_trip('gzip')
 
@@ -23,7 +26,7 @@ class RegistryCacheTest(unittest.TestCase):
     def test_zstd_snapshot_preserves_incremental_build(self):
         self.snapshot_round_trip('zstd')
 
-    def snapshot_round_trip(self, compression):
+    def snapshot_round_trip(self, compression, fallback=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             build = root / 'out'
@@ -39,6 +42,8 @@ class RegistryCacheTest(unittest.TestCase):
 
             def registry(command, **kwargs):
                 if command[:2] == ['oras', 'resolve']:
+                    if fallback and command[2].endswith(':out-test'):
+                        return subprocess.CompletedProcess(command, 1, '', 'new variant not cached yet')
                     return subprocess.CompletedProcess(command, 0, 'sha256:' + 'a' * 64, '')
                 if command[:2] == ['oras', 'push']:
                     for name in ['snapshot.json', 'snapshot.tar.zst' if compression == 'zstd' else 'snapshot.tar.gz']:
@@ -56,6 +61,8 @@ class RegistryCacheTest(unittest.TestCase):
                     cache.main()
                 shutil.rmtree(build)
                 args[1] = 'pull'
+                if fallback:
+                    args.extend(['--fallback-reference', 'ghcr.io/example/cache:legacy'])
                 with patch('sys.argv', args):
                     cache.main()
                 self.assertEqual((build / 'result').stat().st_mtime_ns, original_time)

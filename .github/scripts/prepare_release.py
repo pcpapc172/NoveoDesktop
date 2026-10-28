@@ -31,7 +31,8 @@ def release_qt_only(source):
 
 
 if __name__ == '__main__':
+    from prepare_windows import with_windows7
     script = Path(__file__).resolve().parents[2] / 'Telegram/build/prepare/prepare.py'
-    code = release_qt_only(without_symbol_tool(script.read_text(encoding='utf-8')))
+    code = with_windows7(release_qt_only(without_symbol_tool(script.read_text(encoding='utf-8'))))
     sys.argv = [str(script), *sys.argv[1:]]
     exec(compile(code, str(script), 'exec'), {'__file__': str(script), '__name__': '__main__'})

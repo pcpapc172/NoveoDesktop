@@ -144,11 +144,13 @@ jobs:
           BUILD_SNAPSHOT_KEY=$(printf '%s\n' "$DEPENDENCY_KEY" "$TOOLCHAIN_KEY" | sha256sum | cut -d ' ' -f1)
           if [ "$BUILD_CONFIGURATION" = Release ]; then
             BUILD_SNAPSHOT_KEY="release-v1-$BUILD_SNAPSHOT_KEY"
-            echo "DEPENDENCY_VARIANT=deps-release-v2" >> "$GITHUB_ENV"
+            echo "DEPENDENCY_SEED_VARIANT=deps-release-v2" >> "$GITHUB_ENV"
+            echo "DEPENDENCY_VARIANT=deps-release-win7-v1" >> "$GITHUB_ENV"
             echo "OUT_CACHE_VARIANT=out-release-v1" >> "$GITHUB_ENV"
             echo "PREPARE_OPTIONS=silent" >> "$GITHUB_ENV"
           else
-            echo "DEPENDENCY_VARIANT=deps" >> "$GITHUB_ENV"
+            echo "DEPENDENCY_SEED_VARIANT=deps" >> "$GITHUB_ENV"
+            echo "DEPENDENCY_VARIANT=deps-win7-v1" >> "$GITHUB_ENV"
             echo "OUT_CACHE_VARIANT=out-v1" >> "$GITHUB_ENV"
             echo "PREPARE_OPTIONS=skip-release silent" >> "$GITHUB_ENV"
           fi
@@ -161,7 +163,7 @@ jobs:
         id: registry-deps
         run: |
           cd %TBUILD%\%REPO_NAME%
-          python .github\scripts\registry_cache.py pull --reference %REGISTRY_CACHE%:%DEPENDENCY_VARIANT%-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
+          python .github\scripts\registry_cache.py pull --reference %REGISTRY_CACHE%:%DEPENDENCY_VARIANT%-%DEPENDENCY_KEY% --fallback-reference %REGISTRY_CACHE%:%DEPENDENCY_SEED_VARIANT%-%DEPENDENCY_KEY% --key %DEPENDENCY_KEY% --root "%TBUILD%" --paths ThirdParty Libraries/win64
 
       - name: Restore partial release dependencies.
         id: registry-partial-deps
@@ -221,7 +223,7 @@ jobs:
         run: |
           if "%BUILD_CONFIGURATION%"=="Release" python %TBUILD%\%REPO_NAME%\.github\scripts\prepare_release.py %PREPARE_OPTIONS% ${{ matrix.qt }}
           if errorlevel 1 exit /b %errorlevel%
-          if "%BUILD_CONFIGURATION%"=="Debug" call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat %PREPARE_OPTIONS% ${{ matrix.qt }}
+          if "%BUILD_CONFIGURATION%"=="Debug" python %TBUILD%\%REPO_NAME%\.github\scripts\prepare_windows.py %PREPARE_OPTIONS% ${{ matrix.qt }}
           if errorlevel 1 exit /b %errorlevel%
 
       - name: Preserve partial release dependencies after preparation fails.
