@@ -128,6 +128,7 @@ constexpr auto kWelcomePreviewLength = 8;
 }
 
 [[nodiscard]] int EnableForumMinMembers(not_null<PeerData*> peer) {
+	if (peer->session().account().noveoApi()) return 1;
 	return peer->session().appConfig().get<int>(
 		u"forum_upgrade_participants_min"_q,
 		200);

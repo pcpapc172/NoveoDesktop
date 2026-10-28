@@ -4,6 +4,7 @@
 #include <QtCore/QDateTime>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QUuid>
+#include <QtCore/QUrlQuery>
 #include <QtNetwork/QHttpMultiPart>
 #include <algorithm>
 
@@ -226,7 +227,7 @@ QVector<MTPChat> SessionClient::commonChats(uint64 userId) const {
 	if (raw.isEmpty() || raw == _self) return result;
 	for (auto i = _chatProfiles.cbegin(); i != _chatProfiles.cend(); ++i) {
 		const auto peer = PeerId(i.key());
-		if (!peerIsChat(peer) || !_dialogs.contains(peer.value) || !_chats.contains(peer.value)) continue;
+		if (i.value().value("chatType") != "group" || !_dialogs.contains(peer.value) || !_chats.contains(peer.value)) continue;
 		const auto members = i.value().value("members").toArray();
 		auto selfMember = false;
 		auto targetMember = false;
@@ -298,12 +299,25 @@ MTPChat SessionClient::nativeChat(const QJsonObject &incoming) {
 		const auto known = _chatPeers.value(raw);
 		if (known) type = peerIsChannel(known) ? "channel" : "group";
 	}
-	const auto channel = (type == "channel");
-	if (type == "group" || channel) profile.insert("chatType", type);
+	const auto broadcast = (type == "channel");
+	const auto previous = _chatPeers.value(raw);
+	const auto known = _chatProfiles.value(previous.value);
+	const auto supergroup = profile.value("isSupergroup").toBool(known.value("isSupergroup").toBool())
+		|| profile.value("forumEnabled").toBool(known.value("forumEnabled").toBool());
+	const auto channel = broadcast || supergroup;
+	if (type == "group" || broadcast) profile.insert("chatType", type);
 	const auto peer = channel ? peerFromChannel(ChannelId(id)) : peerFromChat(ChatId(id));
-	auto merged = _chatProfiles.value(peer.value);
+	auto merged = previous ? known : _chatProfiles.value(peer.value);
 	for (auto i = profile.begin(); i != profile.end(); ++i) merged.insert(i.key(), i.value());
 	profile = merged;
+	if (supergroup && previous && peerIsChat(previous)) {
+		_chats[previous.value] = MTP_chat(MTP_flags(MTPDchat::Flag::f_deactivated | MTPDchat::Flag::f_migrated_to),
+			MTP_long(id), MTP_string(profile.value("chatName").toString()), MTP_chatPhotoEmpty(),
+			MTP_int(profile.value("memberCount").toInt()), MTPint(), MTP_int(1),
+			MTP_inputChannel(MTP_long(id), MTP_long(1)), MTPChatAdminRights(), MTPChatBannedRights());
+		_dialogs.remove(previous.value);
+		_messages.remove(previous.value);
+	}
 	_chatIds[peer.value] = raw; _chatPeers[raw] = peer; _chatProfiles[peer.value] = profile;
 	const auto owner = profile.value("ownerId").toString() == _self;
 	if (!profile.contains("canManageSettings") && !_chatProfilesLoading.contains(raw)) {
@@ -318,7 +332,7 @@ MTPChat SessionClient::nativeChat(const QJsonObject &incoming) {
 		}, true, [=, this](QString) { _chatProfilesLoading.remove(raw); });
 	}
 	const auto admin = owner || profile.value("adminIds").toArray().contains(_self);
-	if (!channel && !admin && !profile.contains("selfPermissions") && !_memberPermissionsLoading.contains(raw)) {
+	if (!broadcast && !admin && !profile.contains("selfPermissions") && !_memberPermissionsLoading.contains(raw)) {
 		_memberPermissionsLoading.insert(raw);
 		memberPermissions(peer, peerFromUser(NativeUserId(_self)), [=, this](QJsonObject response, QString error) {
 			_memberPermissionsLoading.remove(raw);
@@ -336,18 +350,22 @@ MTPChat SessionClient::nativeChat(const QJsonObject &incoming) {
 	const auto manage = owner || (admin && profile.value("canManageSettings").toBool(true));
 	auto adminFlags = MTPDchatAdminRights::Flags();
 	if (admin) adminFlags |= MTPDchatAdminRights::Flag::f_post_messages | MTPDchatAdminRights::Flag::f_edit_messages | MTPDchatAdminRights::Flag::f_delete_messages;
-	if (manage) adminFlags |= MTPDchatAdminRights::Flag::f_change_info | MTPDchatAdminRights::Flag::f_invite_users | MTPDchatAdminRights::Flag::f_pin_messages | MTPDchatAdminRights::Flag::f_ban_users | MTPDchatAdminRights::Flag::f_add_admins | MTPDchatAdminRights::Flag::f_manage_call;
+	if (manage) adminFlags |= MTPDchatAdminRights::Flag::f_change_info | MTPDchatAdminRights::Flag::f_invite_users | MTPDchatAdminRights::Flag::f_pin_messages | MTPDchatAdminRights::Flag::f_ban_users | MTPDchatAdminRights::Flag::f_add_admins | MTPDchatAdminRights::Flag::f_manage_call | MTPDchatAdminRights::Flag::f_manage_topics | MTPDchatAdminRights::Flag::f_manage_ranks;
 	const auto rights = MTP_chatAdminRights(MTP_flags(adminFlags));
 	auto banned = MTPDchatBannedRights::Flags();
 	const auto permissions = !admin && profile.value("selfPermissions").isObject() ? profile.value("selfPermissions").toObject() : profile.value("permissions").toObject();
 	if (!permissions.value("canSendMessages").toBool(true)) banned |= MTPDchatBannedRights::Flag::f_send_plain | MTPDchatBannedRights::Flag::f_send_messages;
 	if (!permissions.value("canSendFiles").toBool(true)) banned |= MTPDchatBannedRights::Flag::f_send_media;
 	if (!permissions.value("canAddMembers").toBool(true)) banned |= MTPDchatBannedRights::Flag::f_invite_users;
+	if (!profile.value("canEditOwnTag").toBool(permissions.value("canEditTags").toBool(true))) banned |= MTPDchatBannedRights::Flag::f_edit_rank;
 	const auto defaultRights = MTP_chatBannedRights(MTP_flags(banned), MTP_int(0));
 	const auto count = profile.value("memberCount").toInt(profile.value("members").toArray().size());
 	const auto title = MTP_string(profile.value("chatName").toString());
 	if (channel) {
-		auto flags = MTPDchannel::Flags(MTPDchannel::Flag::f_broadcast | MTPDchannel::Flag::f_access_hash | MTPDchannel::Flag::f_default_banned_rights | MTPDchannel::Flag::f_participants_count);
+		auto flags = MTPDchannel::Flags(MTPDchannel::Flag::f_access_hash | MTPDchannel::Flag::f_default_banned_rights | MTPDchannel::Flag::f_participants_count);
+		flags |= broadcast ? MTPDchannel::Flag::f_broadcast : MTPDchannel::Flag::f_megagroup;
+		if (profile.value("forumEnabled").toBool()) flags |= MTPDchannel::Flag::f_forum;
+		if (profile.value("forumTabs").toBool()) flags |= MTPDchannel::Flag::f_forum_tabs;
 		if (owner) flags |= MTPDchannel::Flag::f_creator;
 		if (admin) flags |= MTPDchannel::Flag::f_admin_rights;
 		if (profile.value("previewOnly").toBool() || (profile.contains("isMember") && !profile.value("isMember").toBool())) flags |= MTPDchannel::Flag::f_left;
@@ -404,11 +422,12 @@ MTPChatFull SessionClient::fullChat(PeerId peer, const QJsonObject &profile) {
 		for (const auto member : profile.value("members").toArray()) {
 			const auto id = RawMember(member); if (id.isEmpty()) continue;
 			const auto uid = MTP_long(NativeUserId(id).bare);
+			const auto rank = profile.value("memberRanks").toObject().value(id).toString();
 			participants.push_back(id == profile.value("ownerId").toString()
-				? MTPChatParticipant(MTP_chatParticipantCreator(MTP_flags(MTPDchatParticipantCreator::Flags()), uid, MTPstring()))
+				? MTPChatParticipant(MTP_chatParticipantCreator(MTP_flags(rank.isEmpty() ? MTPDchatParticipantCreator::Flags() : MTPDchatParticipantCreator::Flag::f_rank), uid, MTP_string(rank)))
 				: profile.value("adminIds").toArray().contains(id)
-				? MTPChatParticipant(MTP_chatParticipantAdmin(MTP_flags(MTPDchatParticipantAdmin::Flags()), uid, MTP_long(NativeUserId(profile.value("ownerId").toString()).bare), MTP_int(0), MTPstring()))
-				: MTPChatParticipant(MTP_chatParticipant(MTP_flags(MTPDchatParticipant::Flags()), uid, MTP_long(0), MTP_int(0), MTPstring())));
+				? MTPChatParticipant(MTP_chatParticipantAdmin(MTP_flags(rank.isEmpty() ? MTPDchatParticipantAdmin::Flags() : MTPDchatParticipantAdmin::Flag::f_rank), uid, MTP_long(NativeUserId(profile.value("ownerId").toString()).bare), MTP_int(0), MTP_string(rank)))
+				: MTPChatParticipant(MTP_chatParticipant(MTP_flags(rank.isEmpty() ? MTPDchatParticipant::Flags() : MTPDchatParticipant::Flag::f_rank), uid, MTP_long(0), MTP_int(0), MTP_string(rank))));
 		}
 		auto flags = MTPDchatFull::Flags(MTPDchatFull::Flag::f_available_reactions);
 		if (pin) flags |= MTPDchatFull::Flag::f_pinned_msg_id;
@@ -433,6 +452,7 @@ MTPChatFull SessionClient::fullChat(PeerId peer, const QJsonObject &profile) {
 		MTPint());
 	}
 	auto flags = MTPDchannelFull::Flags(MTPDchannelFull::Flag::f_participants_count | MTPDchannelFull::Flag::f_available_reactions);
+	if (profile.value("viewForumAsMessages").toBool()) flags |= MTPDchannelFull::Flag::f_view_forum_as_messages;
 	if (profile.value("canViewMembers").toBool(true)) flags |= MTPDchannelFull::Flag::f_can_view_participants;
 	if (pin) flags |= MTPDchannelFull::Flag::f_pinned_msg_id;
 	return MTP_channelFull(
@@ -508,6 +528,215 @@ void SessionClient::chatAction(mtpRequestId id, PeerId peer, QString action, QJs
 		}, true, {}, true);
 	} else {
 		submit(extra);
+	}
+}
+
+QString SessionClient::forumTopic(PeerId peer, int root) const {
+	if (root == 1) return u"general"_q;
+	for (const auto value : _forumTopics.value(peer.value)) {
+		const auto topic = value.toObject();
+		if (topic.value("rootServerMessageId").toInt() == root) return topic.value("topicId").toString();
+	}
+	return {};
+}
+
+void SessionClient::rememberForum(PeerId peer, const QJsonArray &topics) {
+	auto saved = _forumTopics.value(peer.value);
+	for (const auto value : topics) {
+		const auto raw = value.toObject().value("topicId").toString();
+		if (raw.isEmpty()) continue;
+		for (auto i = saved.size(); i > 0; --i) {
+			if (saved[i - 1].toObject().value("topicId").toString() == raw) saved.removeAt(i - 1);
+		}
+		saved.push_back(value);
+		const auto topic = value.toObject();
+		const auto root = topic.value("rootServerMessageId").toInt();
+		const auto message = topic.value("rootMessageId").toString();
+		if (root > 1 && !message.isEmpty()) { _messageIds[message] = root; _rawMessages[root] = message; }
+	}
+	_forumTopics[peer.value] = saved;
+}
+
+MTPmessages_ForumTopics SessionClient::forumTopics(PeerId peer, const QJsonObject &response) {
+	const auto source = response.value("topics").toArray();
+	rememberForum(peer, source);
+	auto topics = QVector<MTPForumTopic>();
+	auto messages = QVector<MTPMessage>();
+	for (const auto value : source) {
+		const auto topic = value.toObject();
+		const auto root = topic.value("topicId") == "general" ? 1 : topic.value("rootServerMessageId").toInt();
+		if (!root) continue;
+		auto flags = MTPDforumTopic::Flags();
+		if (topic.value("creatorId").toString() == _self) flags |= MTPDforumTopic::Flag::f_my;
+		if (topic.value("closed").toBool()) flags |= MTPDforumTopic::Flag::f_closed;
+		if (topic.value("hidden").toBool()) flags |= MTPDforumTopic::Flag::f_hidden;
+		if (topic.contains("pinnedRank") && !topic.value("pinnedRank").isNull()) flags |= MTPDforumTopic::Flag::f_pinned;
+		const auto emoji = topic.value("iconEmojiId").toString().toLongLong();
+		if (emoji) flags |= MTPDforumTopic::Flag::f_icon_emoji_id;
+		const auto last = topic.value("lastMessage").toObject();
+		auto top = 0;
+		if (!last.isEmpty()) {
+			cacheMessages(peer, QJsonArray{last});
+			messages.push_back(nativeMessage(last, peer));
+			top = last.value("serverMessageId").toInt();
+		}
+		topics.push_back(MTP_forumTopic(MTP_flags(flags), MTP_int(root), MTP_int(topic.value("createdAt").toInt()),
+			peerToMTP(peer), MTP_string(topic.value("title").toString()), MTP_int(topic.value("iconColor").toInt()), MTP_long(emoji),
+			MTP_int(top), MTP_int(_messageIds.value(topic.value("readInboxMessageId").toString())),
+			MTP_int(_messageIds.value(topic.value("readOutboxMessageId").toString())), MTP_int(topic.value("unreadCount").toInt()),
+			MTPint(), MTPint(), MTPint(), MTP_peerUser(MTP_long(NativeUserId(topic.value("creatorId").toString()).bare)),
+			notify(peer), MTPDraftMessage()));
+	}
+	return MTP_messages_forumTopics(MTP_flags(MTPDmessages_forumTopics::Flags()), MTP_int(response.value("count").toInt()),
+		MTP_vector<MTPForumTopic>(topics), MTP_vector<MTPMessage>(messages), MTP_vector<MTPChat>(_chats.values().toVector()),
+		MTP_vector<MTPUser>(_users.values().toVector()), MTP_int(_pts));
+}
+
+bool SessionClient::forumRequest(mtpRequestId id, const mtpBuffer &body) {
+	for (const auto &request : _wireRequests) if (request.id == id) return true;
+	if (_transfers.contains(id)) return true;
+	const auto type = uint32(body.front());
+	const auto bad = [&](QString error = u"NOVEO_BAD_REQUEST"_q) { _pending.remove(id); fail(id, error); return true; };
+	const auto mutate = [=, this](PeerId peer, QJsonObject payload) {
+		const auto raw = _chatIds.value(peer.value);
+		if (raw.isEmpty()) return bad(u"NOVEO_PEER_UNKNOWN"_q);
+		payload.insert("chatId", raw);
+		api(id, u"/chat/forum"_q, payload, [=, this](QJsonObject response) {
+			auto profile = _chatProfiles.value(peer.value);
+			profile.insert("isSupergroup", true);
+			profile.insert("forumEnabled", response.value("enabled"));
+			profile.insert("forumTabs", response.value("tabs"));
+			profile.insert("viewForumAsMessages", response.value("viewAsMessages"));
+			const auto chat = nativeChat(profile);
+			const auto current = _chatPeers.value(raw);
+			_chats[current.value] = chat;
+			rememberForum(current, response.value("topics").toArray());
+			auto messages = QVector<MTPUpdate>();
+			const auto changed = response.value("changedTopic").toObject();
+			if (!changed.isEmpty()) {
+				rememberForum(current, QJsonArray{changed});
+				const auto root = changed.value("rootServerMessageId").toInt();
+				if (payload.value("action") == "create" && root > 1) {
+					const auto object = QJsonObject{{"messageId",changed.value("rootMessageId")}, {"serverMessageId",root},
+						{"senderId",changed.value("creatorId")}, {"timestamp",changed.value("createdAt")},
+						{"content",QJsonObject{{"forumTopicCreated",changed}}}};
+					cacheMessages(current, QJsonArray{object});
+					messages.push_back(MTP_updateNewChannelMessage(nativeMessage(object, current), MTP_int(++_pts), MTP_int(1)));
+				}
+			}
+			if (payload.value("action") == "delete") {
+				reply(id, MTPmessages_AffectedHistory(MTP_messages_affectedHistory(MTP_int(_pts), MTP_int(0), MTP_int(response.value("remaining").toInt() > 0 ? 1 : 0))));
+			} else {
+				reply(id, updates(messages));
+			}
+			_auth->send(QJsonObject{{"type","resync_state"}});
+		}, true);
+		return true;
+	};
+	switch (type) {
+	case mtpc_messages_editChatParticipantRank: {
+		if (!_auth->authenticated() || !_historyReady) return true;
+		const auto r = ReadRequest<mtpc_messages_editChatParticipantRank>(body); if (!r) return bad();
+		const auto peer = inputPeer(r->peer);
+		const auto target = inputPeer(r->participant);
+		const auto raw = _rawUsers.value(target.value);
+		if (raw.isEmpty() || !_chatIds.contains(peer.value)) return bad(u"NOVEO_PEER_UNKNOWN"_q);
+		api(id,u"/chat/member-tag"_q,{{"chatId",_chatIds.value(peer.value)},{"userId",raw},{"rank",String(r->rank)}},
+			[=, this](QJsonObject) { reply(id,updates({})); },true);
+		return true;
+	}
+	case mtpc_channels_toggleForum: {
+		const auto r = ReadRequest<mtpc_channels_toggleForum>(body); if (!r || r->channel.type() != mtpc_inputChannel) return bad();
+		return mutate(peerFromChannel(ChannelId(r->channel.c_inputChannel().vchannel_id().v)),
+			{{"action","setEnabled"},{"enabled",(r->enabled.type() == mtpc_boolTrue)},{"tabs",(r->tabs.type() == mtpc_boolTrue)}});
+	}
+	case mtpc_messages_migrateChat: {
+		const auto r = ReadRequest<mtpc_messages_migrateChat>(body); if (!r) return bad();
+		return mutate(peerFromChat(ChatId(r->chat_id.v)), {{"action","setEnabled"},{"enabled",false}});
+	}
+	case mtpc_messages_getForumTopics:
+	case mtpc_messages_getForumTopicsByID: {
+		auto peer = PeerId(); auto query = QUrlQuery();
+		if (type == mtpc_messages_getForumTopics) {
+			const auto r = ReadRequest<mtpc_messages_getForumTopics>(body); if (!r) return bad();
+			peer = inputPeer(r->peer); query.addQueryItem(u"limit"_q, QString::number(std::clamp(r->limit.v,1,100)));
+			query.addQueryItem(u"q"_q, String(r->q));
+			if (r->offset_topic.v) { const auto raw = forumTopic(peer,r->offset_topic.v); if (raw.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q); query.addQueryItem(u"offsetTopic"_q,raw); }
+		} else {
+			const auto r = ReadRequest<mtpc_messages_getForumTopicsByID>(body); if (!r) return bad();
+			peer = inputPeer(r->peer); auto selected = QStringList();
+			for (const auto root : r->topics.v) { const auto raw = forumTopic(peer,root.v); if (raw.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q); selected.push_back(raw); }
+			query.addQueryItem(u"topicIds"_q, selected.join(','));
+		}
+		query.addQueryItem(u"chatId"_q, _chatIds.value(peer.value));
+		api(id, u"/chat/forum?"_q + query.toString(QUrl::FullyEncoded), {}, [=, this](QJsonObject response) { reply(id, forumTopics(peer,response)); });
+		return true;
+	}
+	case mtpc_messages_createForumTopic: {
+		const auto r = ReadRequest<mtpc_messages_createForumTopic>(body); if (!r) return bad();
+		return mutate(inputPeer(r->peer), {{"action","create"},{"title",String(r->title)}, {"iconColor",r->icon_color.v ? r->icon_color.v : 0x6FB9F0},
+			{"iconEmojiId",r->icon_emoji_id.v ? QString::number(r->icon_emoji_id.v) : QString()}, {"creationKey",QString::number(r->random_id.v)}});
+	}
+	case mtpc_messages_editForumTopic: {
+		const auto r = ReadRequest<mtpc_messages_editForumTopic>(body); if (!r) return bad();
+		const auto peer = inputPeer(r->peer); const auto raw = forumTopic(peer,r->topic_id.v); if (raw.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q);
+		auto changes = QJsonObject();
+		if (r->flags.v & 1) changes.insert("title",String(r->title));
+		if (r->flags.v & 2) changes.insert("iconEmojiId",r->icon_emoji_id.v ? QString::number(r->icon_emoji_id.v) : QString());
+		if (r->flags.v & 4) changes.insert("closed",(r->closed.type() == mtpc_boolTrue));
+		if (r->flags.v & 8) changes.insert("hidden",(r->hidden.type() == mtpc_boolTrue));
+		return mutate(peer,{{"action","edit"},{"topicId",raw},{"changes",changes}});
+	}
+	case mtpc_messages_deleteTopicHistory: {
+		const auto r = ReadRequest<mtpc_messages_deleteTopicHistory>(body); if (!r) return bad();
+		const auto peer = inputPeer(r->peer); const auto raw = forumTopic(peer,r->top_msg_id.v); if (raw.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q);
+		return mutate(peer,{{"action","delete"},{"topicId",raw}});
+	}
+	case mtpc_messages_getReplies: {
+		const auto r = ReadRequest<mtpc_messages_getReplies>(body); if (!r) return bad();
+		const auto peer = inputPeer(r->peer); const auto raw = forumTopic(peer,r->msg_id.v); if (raw.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q);
+		wire(id, {{{"type","load_history_page"},{"chatId",_chatIds.value(peer.value)},{"topicId",raw},{"requestId",QString::number(id)},
+			{"limit",std::clamp(r->limit.v,1,100)},{"offsetId",r->offset_id.v},{"offsetDate",r->offset_date.v},{"addOffset",r->add_offset.v}}}, {"history_page"}, [=, this](QJsonObject frame) {
+			if (frame.contains("error")) { fail(id,u"NOVEO_HISTORY_FAILED"_q); return; }
+			cacheMessages(peer,frame.value("messages").toArray()); auto messages = QVector<MTPMessage>();
+			for (const auto value : frame.value("messages").toArray()) messages.push_back(nativeMessage(value.toObject(),peer));
+			reply(id,messagePage(peer,std::move(messages),frame.value("count").toInt()));
+		});
+		return true;
+	}
+	case mtpc_messages_updatePinnedForumTopic:
+	case mtpc_messages_reorderPinnedForumTopics: {
+		auto peer = PeerId(); auto pins = QJsonArray();
+		if (type == mtpc_messages_reorderPinnedForumTopics) {
+			const auto r = ReadRequest<mtpc_messages_reorderPinnedForumTopics>(body); if (!r) return bad();
+			peer = inputPeer(r->peer);
+			for (const auto root : r->order.v) { const auto raw = forumTopic(peer,root.v); if (raw.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q); pins.push_back(raw); }
+		} else {
+			const auto r = ReadRequest<mtpc_messages_updatePinnedForumTopic>(body); if (!r) return bad();
+			peer = inputPeer(r->peer); const auto target = forumTopic(peer,r->topic_id.v); if (target.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q);
+			if ((r->pinned.type() == mtpc_boolTrue)) pins.push_back(target);
+			auto saved = _forumTopics.value(peer.value).toVariantList();
+			std::stable_sort(saved.begin(),saved.end(),[](const QVariant &a, const QVariant &b) { return a.toMap().value("pinnedRank").toInt() < b.toMap().value("pinnedRank").toInt(); });
+			for (const auto &value : saved) {
+				const auto topic = QJsonObject::fromVariantMap(value.toMap());
+				if (topic.contains("pinnedRank") && !topic.value("pinnedRank").isNull() && topic.value("topicId").toString() != target) pins.push_back(topic.value("topicId"));
+			}
+		}
+		return mutate(peer,{{"action","reorderPins"},{"topicIds",pins}});
+	}
+	case mtpc_messages_readDiscussion: {
+		const auto r = ReadRequest<mtpc_messages_readDiscussion>(body); if (!r) return bad();
+		const auto peer = inputPeer(r->peer); const auto raw = forumTopic(peer,r->msg_id.v); const auto message = _rawMessages.value(r->read_max_id.v);
+		if (raw.isEmpty() || message.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q);
+		api(id,u"/chat/forum/read"_q,{{"chatId",_chatIds.value(peer.value)},{"topicId",raw},{"messageId",message}}, [=, this](QJsonObject) { reply(id,MTPBool(MTP_boolTrue())); },true);
+		return true;
+	}
+	case mtpc_channels_toggleViewForumAsMessages: {
+		const auto r = ReadRequest<mtpc_channels_toggleViewForumAsMessages>(body); if (!r || r->channel.type() != mtpc_inputChannel) return bad();
+		return mutate(peerFromChannel(ChannelId(r->channel.c_inputChannel().vchannel_id().v)),
+			{{"action","setViewMode"},{"viewAsMessages",r->enabled.type() == mtpc_boolTrue}});
+	}
+	default: return false;
 	}
 }
 
@@ -725,6 +954,11 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 			{"limit", std::clamp(r.limit.v + std::max(0, r.add_offset.v), 1, 100)},
 			{"minDate", r.min_date.v}, {"maxDate", r.max_date.v}};
 		if (!mediaKind.isEmpty()) search.insert("mediaKind", mediaKind);
+		if (r.flags.v & (1 << 1)) {
+			const auto topic = forumTopic(peer,r.top_msg_id.v);
+			if (topic.isEmpty()) return bad(u"TOPIC_ID_INVALID"_q);
+			search.insert("topicId",topic);
+		}
 		if (r.offset_id.v && r.offset_id.v != 0x3FFFFFFF) {
 			auto offset = r.offset_id.v;
 			if (r.add_offset.v < 0 && r.add_offset.v <= -r.limit.v) --offset;
@@ -1107,7 +1341,9 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		if (!parsed) return bad();
 		const auto &r = *parsed;
 		const auto raw = _rawUsers.value(userId(r.user_id)); if (raw.isEmpty()) return bad("NOVEO_PEER_UNKNOWN");
-		chatAction(id, channelPeer(r.channel), bool(r.admin_rights.c_chatAdminRights().vflags().v) ? "add_admin" : "remove_admin", {{"memberId", raw}});
+		auto extra = QJsonObject{{"memberId",raw}};
+		if (r.flags.v & 1) extra.insert("rank",String(r.rank));
+		chatAction(id, channelPeer(r.channel), bool(r.admin_rights.c_chatAdminRights().vflags().v) ? "add_admin" : "remove_admin", extra);
 		return true;
 	}
 	case mtpc_channels_editBanned: {
@@ -1129,6 +1365,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 		const auto &rights = r.banned_rights.c_chatBannedRights();
 		chatAction(id, inputPeer(r.peer), "set_permissions", {{"canSendMessages", !(rights.is_send_plain() || rights.is_send_messages())},
 			{"canSendFiles", !rights.is_send_media()}, {"canAddMembers", !rights.is_invite_users()},
+			{"canEditTags", !rights.is_edit_rank()},
 			{"canViewMembers", _chatProfiles.value(inputPeer(r.peer).value).value("canViewMembers").toBool(true)}});
 		return true;
 	}
@@ -1348,9 +1585,10 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 				if (filter.type() == mtpc_channelParticipantsKicked || filter.type() == mtpc_channelParticipantsBanned) continue;
 				if (!query.isEmpty() && !memberId.contains(query, Qt::CaseInsensitive) && !_profiles.value(NativeUserId(memberId).bare).value("username").toString().contains(query, Qt::CaseInsensitive)) continue;
 				const auto uid = MTP_long(NativeUserId(memberId).bare);
-				if (memberId == owner) participants.push_back(MTP_channelParticipantCreator(MTP_flags(MTPDchannelParticipantCreator::Flags()), uid, MTP_chatAdminRights(MTP_flags(MTPDchatAdminRights::Flag::f_change_info | MTPDchatAdminRights::Flag::f_delete_messages | MTPDchatAdminRights::Flag::f_invite_users | MTPDchatAdminRights::Flag::f_add_admins)), MTPstring()));
-				else if (admin) participants.push_back(MTP_channelParticipantAdmin(MTP_flags(MTPDchannelParticipantAdmin::Flag::f_can_edit), uid, MTPlong(), MTP_long(NativeUserId(owner).bare), MTP_int(0), MTP_chatAdminRights(MTP_flags(MTPDchatAdminRights::Flag::f_change_info | MTPDchatAdminRights::Flag::f_delete_messages | MTPDchatAdminRights::Flag::f_invite_users)), MTPstring()));
-				else participants.push_back(MTP_channelParticipant(MTP_flags(MTPDchannelParticipant::Flags()), uid, MTP_int(0), MTPint(), MTPstring()));
+				const auto rank = profile.value("memberRanks").toObject().value(memberId).toString();
+				if (memberId == owner) participants.push_back(MTP_channelParticipantCreator(MTP_flags(rank.isEmpty() ? MTPDchannelParticipantCreator::Flags() : MTPDchannelParticipantCreator::Flag::f_rank), uid, MTP_chatAdminRights(MTP_flags(MTPDchatAdminRights::Flag::f_change_info | MTPDchatAdminRights::Flag::f_delete_messages | MTPDchatAdminRights::Flag::f_invite_users | MTPDchatAdminRights::Flag::f_add_admins)), MTP_string(rank)));
+				else if (admin) participants.push_back(MTP_channelParticipantAdmin(MTP_flags(MTPDchannelParticipantAdmin::Flag::f_can_edit | (rank.isEmpty() ? MTPDchannelParticipantAdmin::Flags() : MTPDchannelParticipantAdmin::Flag::f_rank)), uid, MTPlong(), MTP_long(NativeUserId(owner).bare), MTP_int(0), MTP_chatAdminRights(MTP_flags(MTPDchatAdminRights::Flag::f_change_info | MTPDchatAdminRights::Flag::f_delete_messages | MTPDchatAdminRights::Flag::f_invite_users)), MTP_string(rank)));
+				else participants.push_back(MTP_channelParticipant(MTP_flags(rank.isEmpty() ? MTPDchannelParticipant::Flags() : MTPDchannelParticipant::Flag::f_rank), uid, MTP_int(0), MTPint(), MTP_string(rank)));
 			}
 			if (!target.isEmpty()) {
 				if (participants.isEmpty()) { fail(id, "USER_NOT_PARTICIPANT"); return; }

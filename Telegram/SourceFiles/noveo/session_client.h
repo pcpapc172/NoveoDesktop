@@ -166,6 +166,7 @@ private:
 	};
 	QVector<WireRequest> _wireRequests;
 	QMap<uint64, QJsonObject> _chatProfiles;
+	QMap<uint64, QJsonArray> _forumTopics;
 	QSet<QString> _memberPermissionsLoading;
 	QSet<QString> _chatProfilesLoading;
 	QSet<QString> _blocked;
@@ -175,6 +176,10 @@ private:
 	QMap<mtpRequestId, QVector<MTPMessage>> _globalSearchResults;
 	QMap<mtpRequestId, std::function<void(QString)>> _actionErrors;
 	bool parityRequest(mtpRequestId id, const mtpBuffer &body);
+	bool forumRequest(mtpRequestId id, const mtpBuffer &body);
+	QString forumTopic(PeerId peer, int root) const;
+	void rememberForum(PeerId peer, const QJsonArray &topics);
+	MTPmessages_ForumTopics forumTopics(PeerId peer, const QJsonObject &response);
 	void wire(mtpRequestId id, QVector<QJsonObject> frames, QStringList replies,
 		std::function<void(QJsonObject)> done);
 	void wireNext();

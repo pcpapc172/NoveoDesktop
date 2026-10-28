@@ -7,6 +7,214 @@
 namespace Noveo {
 template <mtpTypeId Type> struct RequestFields;
 
+template <> struct RequestFields<mtpc_messages_editChatParticipantRank> {
+	MTPInputPeer peer;
+	MTPInputPeer participant;
+	MTPstring rank;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& participant.read(from, end)
+			&& rank.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getForumTopics> {
+	MTPint flags;
+	MTPInputPeer peer;
+	MTPstring q;
+	MTPint offset_date;
+	MTPint offset_id;
+	MTPint offset_topic;
+	MTPint limit;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& (!(flags.v & (1U << 0)) || q.read(from, end))
+			&& offset_date.read(from, end)
+			&& offset_id.read(from, end)
+			&& offset_topic.read(from, end)
+			&& limit.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getForumTopicsByID> {
+	MTPInputPeer peer;
+	MTPVector<MTPint> topics;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& topics.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_createForumTopic> {
+	MTPint flags;
+	MTPInputPeer peer;
+	MTPstring title;
+	MTPint icon_color;
+	MTPlong icon_emoji_id;
+	MTPlong random_id;
+	MTPInputPeer send_as;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& title.read(from, end)
+			&& (!(flags.v & (1U << 0)) || icon_color.read(from, end))
+			&& (!(flags.v & (1U << 3)) || icon_emoji_id.read(from, end))
+			&& random_id.read(from, end)
+			&& (!(flags.v & (1U << 2)) || send_as.read(from, end))
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_editForumTopic> {
+	MTPint flags;
+	MTPInputPeer peer;
+	MTPint topic_id;
+	MTPstring title;
+	MTPlong icon_emoji_id;
+	MTPBool closed;
+	MTPBool hidden;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& topic_id.read(from, end)
+			&& (!(flags.v & (1U << 0)) || title.read(from, end))
+			&& (!(flags.v & (1U << 1)) || icon_emoji_id.read(from, end))
+			&& (!(flags.v & (1U << 2)) || closed.read(from, end))
+			&& (!(flags.v & (1U << 3)) || hidden.read(from, end))
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_deleteTopicHistory> {
+	MTPInputPeer peer;
+	MTPint top_msg_id;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& top_msg_id.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_updatePinnedForumTopic> {
+	MTPInputPeer peer;
+	MTPint topic_id;
+	MTPBool pinned;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& topic_id.read(from, end)
+			&& pinned.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_reorderPinnedForumTopics> {
+	MTPint flags;
+	MTPInputPeer peer;
+	MTPVector<MTPint> order;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return flags.read(from, end)
+			&& peer.read(from, end)
+			&& order.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_channels_toggleForum> {
+	MTPInputChannel channel;
+	MTPBool enabled;
+	MTPBool tabs;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return channel.read(from, end)
+			&& enabled.read(from, end)
+			&& tabs.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_migrateChat> {
+	MTPlong chat_id;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return chat_id.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_getReplies> {
+	MTPInputPeer peer;
+	MTPint msg_id;
+	MTPint offset_id;
+	MTPint offset_date;
+	MTPint add_offset;
+	MTPint limit;
+	MTPint max_id;
+	MTPint min_id;
+	MTPlong hash;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& msg_id.read(from, end)
+			&& offset_id.read(from, end)
+			&& offset_date.read(from, end)
+			&& add_offset.read(from, end)
+			&& limit.read(from, end)
+			&& max_id.read(from, end)
+			&& min_id.read(from, end)
+			&& hash.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_messages_readDiscussion> {
+	MTPInputPeer peer;
+	MTPint msg_id;
+	MTPint read_max_id;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return peer.read(from, end)
+			&& msg_id.read(from, end)
+			&& read_max_id.read(from, end)
+			&& from == end;
+	}
+};
+
+template <> struct RequestFields<mtpc_channels_toggleViewForumAsMessages> {
+	MTPInputChannel channel;
+	MTPBool enabled;
+	bool read(const mtpBuffer &body) {
+		auto from = body.constData() + 1;
+		const auto end = body.constData() + body.size();
+		return channel.read(from, end)
+			&& enabled.read(from, end)
+			&& from == end;
+	}
+};
+
 template <> struct RequestFields<mtpc_messages_getHistory> {
 	MTPInputPeer peer;
 	MTPint offset_id;

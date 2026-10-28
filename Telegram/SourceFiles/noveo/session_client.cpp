@@ -604,6 +604,7 @@ void SessionClient::reset() {
 	_contextPeers.clear();
 	_globalSearchResults.clear();
 	_chatProfiles.clear();
+	_forumTopics.clear();
 	_memberPermissionsLoading.clear();
 	_chatProfilesLoading.clear();
 	_blocked.clear();
@@ -957,14 +958,17 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		sender = RawId(profile);
 	}
 	const auto senderId = NativeUserId(sender);
+	const auto broadcast = peerIsChannel(peer) && _chatProfiles.value(peer.value).value("chatType") == "channel";
+	const auto rank = peerIsChannel(peer) && !broadcast ? Text(object.value("senderRank")) : QString();
 	if (!_users.contains(senderId.bare)) {
 		users(QJsonArray{QJsonObject{{"userId", sender}, {"username", sender}}});
 	}
 	auto flags = MTPDmessage::Flags(MTPDmessage::Flag::f_from_id);
+	if (!rank.isEmpty()) flags |= MTPDmessage::Flag::f_from_rank;
 	if (sender == _self) {
 		flags |= MTPDmessage::Flag::f_out;
 	}
-	if (peerIsChannel(peer)) {
+	if (broadcast) {
 		flags |= MTPDmessage::Flag::f_post;
 	}
 	auto content = object.value("content");
@@ -1036,8 +1040,9 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		_rawMessages[parentId] = replyRaw;
 	}
 	const auto replyId = _messageIds.value(replyRaw);
+	const auto topicRoot = object.value("topicServerMessageId").toInt();
 	if (replyId) _contextPeers[replyId] = peer;
-	if (replyId) {
+	if (replyId || topicRoot) {
 		flags |= MTPDmessage::Flag::f_reply_to;
 	}
 	_messageContent[id] = content.isObject() ? content.toObject() : QJsonObject{{"text", text}};
@@ -1073,7 +1078,7 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 	}
 	const auto details = giftDetails(id);
 	if (!details.isEmpty() && media.type() == mtpc_messageMediaEmpty) {
-		const auto fromPeer = peerIsChannel(peer) ? peerToMTP(peer)
+		const auto fromPeer = broadcast ? peerToMTP(peer)
 			: MTPPeer(MTP_peerUser(MTP_long(senderId.bare)));
 		auto action = MTPMessageAction(MTP_messageActionEmpty());
 		if (details.value("kind") == "stars") {
@@ -1091,7 +1096,7 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 		if (action.type() != mtpc_messageActionEmpty) {
 			auto serviceFlags = MTPDmessageService::Flags(MTPDmessageService::Flag::f_from_id);
 			if (sender == _self) serviceFlags |= MTPDmessageService::Flag::f_out;
-			if (peerIsChannel(peer)) serviceFlags |= MTPDmessageService::Flag::f_post;
+			if (broadcast) serviceFlags |= MTPDmessageService::Flag::f_post;
 			return MTP_messageService(MTP_flags(serviceFlags), MTP_int(id), fromPeer,
 				peerToMTP(peer), MTPPeer(), MTPMessageReplyHeader(), MTP_int(Date(object)),
 				action, MTPMessageReactions(), MTPint());
@@ -1106,15 +1111,16 @@ MTPMessage SessionClient::nativeMessage(const QJsonObject &object, PeerId peer) 
 	if (!entities.v.isEmpty()) flags |= MTPDmessage::Flag::f_entities;
 	if (markup.type() == mtpc_replyInlineMarkup) flags |= MTPDmessage::Flag::f_reply_markup;
 	return MTP_message(MTP_flags(flags), MTP_int(id),
-		peerIsChannel(peer) ? peerToMTP(peer) : MTPPeer(MTP_peerUser(MTP_long(senderId.bare))), MTPint(), MTPstring(),
+		broadcast ? peerToMTP(peer) : MTPPeer(MTP_peerUser(MTP_long(senderId.bare))), MTPint(), MTP_string(rank),
 		MTPPeer(peerToMTP(peer)), MTPPeer(),
 		MTP_messageFwdHeader(MTP_flags(MTPDmessageFwdHeader::Flag::f_from_name), MTPPeer(),
 			MTP_string(Text(forward.value("from"))),
 			MTP_int(Date(QJsonObject{{"timestamp", forward.value("originalTs")}})), MTPint(),
 			MTPstring(), MTPPeer(), MTPint(), MTPPeer(), MTPstring(), MTPint(), MTPstring()),
 		MTPlong(), MTPlong(), MTPPeer(),
-		MTP_messageReplyHeader(MTP_flags(MTPDmessageReplyHeader::Flag::f_reply_to_msg_id),
-			MTP_int(replyId), MTPPeer(), MTPMessageFwdHeader(), MTPMessageMedia(), MTPint(),
+		MTP_messageReplyHeader(MTP_flags(MTPDmessageReplyHeader::Flag::f_reply_to_msg_id
+			| (topicRoot ? MTPDmessageReplyHeader::Flag::f_forum_topic | MTPDmessageReplyHeader::Flag::f_reply_to_top_id : MTPDmessageReplyHeader::Flags())),
+			MTP_int(replyId ? replyId : topicRoot), MTPPeer(), MTPMessageFwdHeader(), MTPMessageMedia(), MTP_int(topicRoot),
 			MTPstring(), MTPVector<MTPMessageEntity>(), MTPint(), MTPint(), MTPbytes()),
 		MTP_int(Date(object)), MTP_string(text), media, markup,
 		entities, MTPint(), MTPint(), MTPMessageReplies(), MTP_int(editedAt),
@@ -1212,7 +1218,7 @@ void SessionClient::history(const QJsonArray &chats) {
 		auto peer = PeerId();
 		if (type == "group" || type == "channel") {
 			const auto id = NativeUserId(raw).bare;
-			const auto channel = type == "channel";
+			const auto channel = type == "channel" || object.value("isSupergroup").toBool() || object.value("forumEnabled").toBool();
 			peer = channel ? peerFromChannel(ChannelId(id)) : peerFromChat(ChatId(id));
 			auto profile = object; profile.insert("previewOnly", false); profile.insert("isMember", true);
 			_chats[peer.value] = nativeChat(profile);
@@ -1245,6 +1251,7 @@ void SessionClient::history(const QJsonArray &chats) {
 		}
 		_chatIds[peer.value] = raw;
 		_chatPeers[raw] = peer;
+		rememberForum(peer, object.value("forumTopics").toArray());
 		auto rows = QVector<QJsonObject>();
 		for (const auto row : object.value("messages").toArray()) {
 			rows.push_back(row.toObject());
@@ -1312,6 +1319,70 @@ void SessionClient::history(const QJsonArray &chats) {
 }
 
 void SessionClient::message(const QJsonObject &frame) {
+	if (frame.value("type") == "forum_message_seen_update") {
+		const auto peer = _chatPeers.value(frame.value("chatId").toString());
+		if (!peerIsChannel(peer)) return;
+		auto root = frame.value("topicId") == "general" ? 1 : 0;
+		for (const auto value : _forumTopics.value(peer.value)) {
+			const auto topic = value.toObject();
+			if (topic.value("topicId") == frame.value("topicId")) root = topic.value("rootServerMessageId").toInt();
+		}
+		const auto mid = frame.value("serverMessageId").toInt(_messageIds.value(frame.value("messageId").toString()));
+		if (root && mid && onUpdate) {
+			const auto update = frame.value("userId").toString() == _self
+				? MTPUpdate(MTP_updateReadChannelDiscussionInbox(MTP_flags(MTPDupdateReadChannelDiscussionInbox::Flags()),MTP_long(peerToChannel(peer).bare),MTP_int(root),MTP_int(mid),MTPlong(),MTPint()))
+				: MTPUpdate(MTP_updateReadChannelDiscussionOutbox(MTP_long(peerToChannel(peer).bare),MTP_int(root),MTP_int(mid)));
+			onUpdate(updates({update}));
+		}
+		return;
+	}
+	if (frame.value("type") == "member_tag_update") {
+		const auto peer = _chatPeers.value(frame.value("chatId").toString());
+		if (!peer) return;
+		const auto raw = frame.value("userId").toString();
+		const auto rank = frame.value("rank").toString();
+		auto profile = _chatProfiles.value(peer.value);
+		auto ranks = profile.value("memberRanks").toObject();
+		if (rank.isEmpty()) ranks.remove(raw); else ranks.insert(raw,rank);
+		profile.insert("memberRanks",ranks); _chatProfiles[peer.value] = profile;
+		auto changes = QVector<MTPUpdate>();
+		if (peerIsChat(peer)) {
+			changes.push_back(MTP_updateChatParticipantRank(MTP_long(peerToChat(peer).bare),MTP_long(NativeUserId(raw).bare),MTP_string(rank),MTP_int(1)));
+		} else if (peerIsChannel(peer)) {
+			for (auto &message : _messages[peer.value]) {
+				if (message.type() != mtpc_message) continue;
+				const auto id = message.c_message().vid().v;
+				auto object = _messageObjects.value(id);
+				if (object.value("senderId").toString() != raw) continue;
+				object.insert("senderRank",rank);
+				message = nativeMessage(object,peer);
+				changes.push_back(MTP_updateEditChannelMessage(message,MTP_int(++_pts),MTP_int(1)));
+			}
+		}
+		if (onUpdate) onUpdate(updates(changes));
+		return;
+	}
+	if (frame.value("type") == "forum_update") {
+		const auto raw = frame.value("chatId").toString();
+		const auto old = _chatPeers.value(raw);
+		auto profile = _chatProfiles.value(old.value);
+		profile.insert("chatId", raw);
+		profile.insert("isSupergroup", true);
+		profile.insert("forumEnabled", frame.value("enabled"));
+		profile.insert("forumTabs", frame.value("tabs"));
+		if (frame.contains("viewAsMessages")) profile.insert("viewForumAsMessages",frame.value("viewAsMessages"));
+		const auto chat = nativeChat(profile);
+		const auto peer = _chatPeers.value(raw);
+		_chats[peer.value] = chat;
+		const auto changed = frame.value("changedTopic").toObject();
+		if (!changed.isEmpty()) rememberForum(peer, QJsonArray{changed});
+		auto changes = QVector<MTPUpdate>{MTP_updateChannel(MTP_long(peerToChannel(peer).bare)),
+			MTP_updatePinnedForumTopics(MTP_flags(MTPDupdatePinnedForumTopics::Flags()),peerToMTP(peer),MTPVector<MTPint>())};
+		if (frame.contains("viewAsMessages")) changes.push_back(MTP_updateChannelViewForumAsMessages(MTP_long(peerToChannel(peer).bare),frame.value("viewAsMessages").toBool() ? MTPBool(MTP_boolTrue()) : MTPBool(MTP_boolFalse())));
+		if (onUpdate) onUpdate(updates(changes));
+		_auth->send(QJsonObject{{"type", "resync_state"}});
+		return;
+	}
 	if (frame.value("type") == "wallet_updated") {
 		++_walletRevision;
 		applyWallet(frame.value("balanceTenths").toInteger());
@@ -1699,13 +1770,18 @@ bool SessionClient::send(mtpRequestId id, PeerId peer, QJsonObject content, uint
 			fail(id, "NOVEO_REPLY_UNSUPPORTED");
 			return false;
 		}
-		const auto uuid = _rawMessages.value(replyTo.c_inputReplyToMessage().vreply_to_msg_id().v);
-		if (uuid.isEmpty()) {
+		const auto &header = replyTo.c_inputReplyToMessage();
+		const auto root = header.vtop_msg_id() ? header.vtop_msg_id()->v : header.vreply_to_msg_id().v;
+		const auto topic = _chatProfiles.value(peer.value).value("forumEnabled").toBool() ? forumTopic(peer,root) : QString();
+		if (!topic.isEmpty()) frame.insert("topicId",topic);
+		const auto general = topic == "general" && header.vreply_to_msg_id().v == 1;
+		const auto uuid = _rawMessages.value(header.vreply_to_msg_id().v);
+		if (uuid.isEmpty() && !general) {
 			cancel(id);
 			fail(id, "NOVEO_REPLY_UNKNOWN");
 			return false;
 		}
-		frame.insert("replyToId", uuid);
+		if (!general) frame.insert("replyToId", uuid);
 	}
 	_sends[temp] = {id, randomId, peer};
 	_auth->send(frame);
@@ -2772,7 +2848,7 @@ void SessionClient::drain() {
 		const auto now = int(QDateTime::currentSecsSinceEpoch());
 		const auto state = MTPupdates_State(
 			MTP_updates_state(MTP_int(_pts), MTP_int(0), MTP_int(now), MTP_int(0), MTP_int(0)));
-		if (premiumRequest(id, body) || economyRequest(id, body) || syncRequest(id, body) || parityRequest(id, body) || featureRequest(id, body) || mediaRequest(id, body)) {
+		if (premiumRequest(id, body) || economyRequest(id, body) || syncRequest(id, body) || forumRequest(id, body) || parityRequest(id, body) || featureRequest(id, body) || mediaRequest(id, body)) {
 			continue;
 		}
 		if (type == mtpc_updates_getState) {
@@ -2931,40 +3007,10 @@ void SessionClient::drain() {
 				fail(id, "NOVEO_METHOD_UNSUPPORTED");
 				continue;
 			}
-			const auto peer = inputPeer(request->peer);
-			const auto raw = _chatIds.value(peer.value);
-			const auto recipient = _rawUsers.value(peerToUser(peer).bare);
-			if (raw.isEmpty() && recipient.isEmpty()) {
-				finish();
-				fail(id, "NOVEO_PEER_UNKNOWN");
-				continue;
-			}
-			const auto temp = QUuid::createUuid().toString(QUuid::WithoutBraces);
-			auto frame = QJsonObject{{"type", "message"}, {"clientTempId", temp},
-				{"content", QJsonObject{{"text", ToMarkdown(qs(request->text), request->entities)}}}};
-			if (!raw.isEmpty()) {
-				frame.insert("chatId", raw);
-			} else {
-				frame.insert("recipientId", recipient);
-			}
-			if (request->flags.v & MTPmessages_SendMessage::Flag::f_reply_to) {
-				const auto reply = &request->reply;
-				if (reply->type() != mtpc_inputReplyToMessage) {
-					finish();
-					fail(id, "NOVEO_REPLY_UNSUPPORTED");
-					continue;
-				}
-				const auto uuid
-					= _rawMessages.value(reply->c_inputReplyToMessage().vreply_to_msg_id().v);
-				if (uuid.isEmpty()) {
-					finish();
-					fail(id, "NOVEO_REPLY_UNKNOWN");
-					continue;
-				}
-				frame.insert("replyToId", uuid);
-			}
-			_sends[temp] = {id, uint64(request->random.v), peer};
-			_auth->send(frame);
+			send(id, inputPeer(request->peer),
+				QJsonObject{{"text", ToMarkdown(qs(request->text), request->entities)}},
+				uint64(request->random.v), request->reply,
+				bool(request->flags.v & MTPmessages_SendMessage::Flag::f_reply_to));
 		} else if (type == mtpc_users_getFullUser) {
 			if (!_auth->authenticated()) {
 				continue;
