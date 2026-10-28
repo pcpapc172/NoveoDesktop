@@ -38,6 +38,9 @@ int main(int argc, char **argv) {
 	const auto edit = [&](int id, const QString &text) {
 		request(id, MTPmessages_EditMessage(MTP_flags(MTPmessages_EditMessage::Flag::f_message), peer, MTP_int(editId), MTP_string(text), MTPInputMedia(), MTPReplyMarkup(), MTPVector<MTPMessageEntity>(), MTPint(), MTPint(), MTPint(), MTPInputRichMessage()));
 	};
+	const auto mediaSearch = [&](int id, MTPMessagesFilter filter, int offset, int addOffset, int limit) {
+        request(id, MTPmessages_Search(MTP_flags(MTPmessages_Search::Flags()), peer, MTP_string(""), MTPInputPeer(), MTPInputPeer(), MTPVector<MTPReaction>(), MTPint(), filter, MTP_int(0), MTP_int(0), MTP_int(offset), MTP_int(addOffset), MTP_int(limit), MTP_int(0), MTP_int(0), MTP_long(0)));
+    };
 	client.onUpdate = [&](const MTPUpdates &updates) {
 		for (const auto &update : updates.c_updates().vupdates().v) {
 			if (update.type() == mtpc_updateDeleteMessages) ++deletions;
@@ -154,6 +157,31 @@ int main(int argc, char **argv) {
 		} else if (id == 121) {
 			const auto result = Decode<MTPmessages_Messages>(body);
 			Assert(qs(result.c_messages_messagesSlice().vmessages().v.front().c_message().vmessage()) == "https://example.com");
+            mediaSearch(122, MTP_inputMessagesFilterUrl(), 0x3FFFFFFF, 0, 0);
+        } else if (id == 122) {
+            const auto result = Decode<MTPmessages_Messages>(body);
+            Assert(result.c_messages_messagesSlice().vmessages().v.isEmpty());
+            Assert(result.c_messages_messagesSlice().vcount().v == 2);
+            mediaSearch(123, MTP_inputMessagesFilterPhotos(), 0x3FFFFFFF, 0, 50);
+        } else if (id == 123) {
+            const auto result = Decode<MTPmessages_Messages>(body);
+            const auto &message = result.c_messages_messagesSlice().vmessages().v.front().c_message();
+            Assert(message.vmedia() && message.vmedia()->type() == mtpc_messageMediaPhoto);
+            parentId = message.vid().v;
+            mediaSearch(124, MTP_inputMessagesFilterPhotos(), parentId + 1, -50, 50);
+        } else if (id == 124) {
+            Assert(!Decode<MTPmessages_Messages>(body).c_messages_messagesSlice().vmessages().v.isEmpty());
+            mediaSearch(125, MTP_inputMessagesFilterPhotos(), parentId, -25, 50);
+        } else if (id == 125) {
+            Assert(!Decode<MTPmessages_Messages>(body).c_messages_messagesSlice().vmessages().v.isEmpty());
+            mediaSearch(126, MTP_inputMessagesFilterRoundVoice(), 0, 0, 0);
+        } else if (id == 126) {
+            mediaSearch(127, MTP_inputMessagesFilterRoundVideo(), 0, 0, 0);
+        } else if (id == 127) {
+            mediaSearch(128, MTP_inputMessagesFilterChatPhotos(), 0, 0, 0);
+        } else if (id == 128) {
+            mediaSearch(130, MTP_inputMessagesFilterPinned(), 0, 0, 0);
+        } else if (id == 130) {
 			request(21, MTPmessages_SearchGlobal(MTP_flags(MTPmessages_SearchGlobal::Flag::f_groups_only), MTPint(), MTPInputChannel(), MTP_string("needle"), MTP_inputMessagesFilterEmpty(), MTP_int(0), MTP_int(0), MTP_int(0), MTP_inputPeerEmpty(), MTP_int(0), MTP_int(50)));
 		} else if (id == 21) {
 			Assert(Decode<MTPmessages_Messages>(body).c_messages_messagesSlice().vmessages().v.size() == 1);

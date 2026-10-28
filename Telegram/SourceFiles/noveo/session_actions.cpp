@@ -692,6 +692,10 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 			case mtpc_inputMessagesFilterVoice: return "voice";
 			case mtpc_inputMessagesFilterMusic: return "music";
 			case mtpc_inputMessagesFilterPoll: return "polls";
+			case mtpc_inputMessagesFilterRoundVoice: return "round_voice";
+			case mtpc_inputMessagesFilterRoundVideo: return "round";
+			case mtpc_inputMessagesFilterChatPhotos: return "chat_photos";
+			case mtpc_inputMessagesFilterPinned: return "pinned";
 			default: return "unsupported";
 			}
 		}();
@@ -701,10 +705,15 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 			{"limit", std::clamp(r.limit.v + std::max(0, r.add_offset.v), 1, 100)},
 			{"minDate", r.min_date.v}, {"maxDate", r.max_date.v}};
 		if (!mediaKind.isEmpty()) search.insert("mediaKind", mediaKind);
-		if (r.offset_id.v) {
-			const auto raw = _rawMessages.value(r.offset_id.v);
+		if (r.offset_id.v && r.offset_id.v != 0x3FFFFFFF) {
+			auto offset = r.offset_id.v;
+			if (r.add_offset.v < 0 && r.add_offset.v <= -r.limit.v) --offset;
+			const auto raw = _rawMessages.value(offset);
 			if (raw.isEmpty()) return bad("NOVEO_MESSAGE_UNKNOWN");
 			search.insert("beforeMessageId", raw);
+			if (r.add_offset.v < 0) {
+				search.insert("cursorMode", r.add_offset.v <= -r.limit.v ? "after" : "around");
+			}
 		}
 		if (r.flags.v & 1) {
 			const auto raw = _rawUsers.value(inputPeer(r.from_id).value);
@@ -727,7 +736,7 @@ bool SessionClient::parityRequest(mtpRequestId id, const mtpBuffer &body) {
 					|| (r.min_id.v && data.vid().v <= r.min_id.v) || (r.max_id.v && data.vid().v >= r.max_id.v)
 					|| ((r.flags.v & 1) && (!data.vfrom_id() || peerFromMTP(*data.vfrom_id()) != inputPeer(r.from_id)));
 			}), messages.end());
-			messages = messages.mid(std::max(0, r.add_offset.v), std::clamp(r.limit.v, 1, 100));
+			messages = messages.mid(std::max(0, r.add_offset.v), std::clamp(r.limit.v, 0, 100));
 			reply(id, messagePage(peer, std::move(messages), count));
 		});
 		return true;
