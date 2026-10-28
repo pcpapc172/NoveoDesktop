@@ -65,9 +65,13 @@ public:
 	[[nodiscard]] MTPStarGift starGift(const QJsonObject &info) const;
 	void loadWallet(std::function<void(QJsonObject, QString)> done = {});
 	void createStarsGiveaway(PeerId peer, QString amount, std::function<void(QString)> done);
-	void submitPremiumReceipt(QString path, std::function<void(QString)> done, QByteArray content = {});
+	void submitPremiumReceipt(QString path, std::function<void(QString)> done, QByteArray content = {}, QString tier = {});
 	[[nodiscard]] qint64 walletBalance() const { return _walletBalance; }
 	[[nodiscard]] QString membershipTier() const;
+	[[nodiscard]] qint64 uploadLimitBytes() const;
+	[[nodiscard]] QString nicknameFont(PeerId peer) const;
+    void setNicknameFont(QString font, std::function<void(QString)> done);
+    std::function<void(UserId, QString)> onNicknameFont;
 	[[nodiscard]] MTPUser premiumBotUser();
 
 	struct LocalSyncState {

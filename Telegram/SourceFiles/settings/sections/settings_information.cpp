@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "noveo/economy_ui.h"
 #include "settings/sections/settings_information.h"
 
 #include "settings/sections/settings_main.h"
@@ -431,6 +432,12 @@ void SetupColor(
 	if (targets) {
 		targets->colorButton = colorButton;
 	}
+    if (controller->session().account().noveoApi()) {
+        const auto button = AddButtonWithIcon(container, tr::lng_noveo_name_font(),
+            st::settingsButton, { &st::menuIconUsername });
+        button->setClickedCallback([=] { Noveo::ShowNameFonts(controller); });
+    }
+
 
 	Ui::AddSkip(container);
 	Ui::AddDivider(container);

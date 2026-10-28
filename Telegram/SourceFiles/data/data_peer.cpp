@@ -1330,6 +1330,13 @@ const QString &PeerData::topBarNameText() const {
 	return _name;
 }
 
+void PeerData::setNoveoNicknameFont(QString font) {
+    if (_noveoNicknameFont == font) return;
+    _noveoNicknameFont = std::move(font);
+    ++_nameVersion;
+    session().changes().peerUpdated(this, UpdateFlag::Name);
+}
+
 int PeerData::nameVersion() const {
 	return _nameVersion;
 }

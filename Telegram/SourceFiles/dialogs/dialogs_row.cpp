@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "noveo/name_fonts.h"
 #include "dialogs/dialogs_row.h"
 
 #include "ui/chat/chat_theme.h" // CountAverageColor.
@@ -985,7 +986,7 @@ const Ui::Text::String &FakeRow::name() const {
 			: nullptr;
 		const auto peer = from ? from : _item->history()->peer.get();
 		_name.setText(
-			st::semiboldTextStyle,
+            Noveo::NameStyle(st::semiboldTextStyle, peer),
 			peer->name(),
 			Ui::NameTextOptions());
 	}

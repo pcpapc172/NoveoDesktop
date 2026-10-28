@@ -87,14 +87,18 @@ int main(int argc, char **argv) {
 				{"userId", "test-user"},
 				{"membershipTier", ""}});
 			Assert(!client.selfUser().c_user().is_premium());
+            Assert(client.uploadLimitBytes() == 50LL * 1024 * 1024);
+            client.setNicknameFont(u"comic"_q, [](QString error) { Assert(error.contains("Silver")); });
 			client.message({{"type", "user_updated"},
 				{"userId", "test-user"},
 				{"membershipTier", "silver"}});
 			Assert(client.selfUser().c_user().is_premium()
 				   && client.membershipTier() == "silver");
+            Assert(client.uploadLimitBytes() == 100LL * 1024 * 1024);
 			client.message({{"type", "user_updated"},
 				{"userId", "test-user"},
 				{"membershipTier", "premium"}});
+			Assert(client.uploadLimitBytes() == 500LL * 1024 * 1024);
 			transactions(2, 1, {}, 1);
 		} else if (id == 2 || id == 3 || id == 4 || id == 5) {
 			const auto result = Decode<MTPpayments_StarsStatus>(body);
@@ -268,11 +272,15 @@ int main(int argc, char **argv) {
 												   && balances > 0
 												   && client.walletBalance()
 														  == 12220);
-											app.exit(0);
+											client.setNicknameFont(u"comic"_q, [&](QString error) {
+                                                Assert(error.isEmpty());
+                                                Assert(client.nicknameFont(peerFromUser(Noveo::NativeUserId("test-user"))) == u"comic"_q);
+                                                app.exit(0);
+                                            });
 										});
 								},
-								image.readAll());
-						});
+								image.readAll(), u"premium_upgrade"_q);
+						}, {}, u"silver"_q);
 				});
 			});
 		} else {

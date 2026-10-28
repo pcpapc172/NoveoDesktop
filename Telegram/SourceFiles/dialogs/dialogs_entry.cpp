@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "noveo/name_fonts.h"
 #include "dialogs/dialogs_entry.h"
 
 #include "dialogs/dialogs_key.h"
@@ -333,7 +334,7 @@ const Ui::Text::String &Entry::chatListNameText() const {
 	if (_chatListNameVersion < version) {
 		_chatListNameVersion = version;
 		_chatListNameText.setText(
-			st::semiboldTextStyle,
+            Noveo::NameStyle(st::semiboldTextStyle, asHistory() ? asHistory()->peer.get() : nullptr),
 			chatListName(),
 			Ui::NameTextOptions());
 	}

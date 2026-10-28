@@ -1423,6 +1423,8 @@ PRIVATE
     noveo/session_stars.cpp
     noveo/session_premium.cpp
     noveo/economy_ui.cpp
+    noveo/name_fonts.cpp
+    noveo/name_fonts.h
     noveo/economy_ui.h
     noveo/sync_state.cpp
     noveo/sync_state.h

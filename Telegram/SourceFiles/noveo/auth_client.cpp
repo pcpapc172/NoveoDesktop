@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonDocument>
 #include <QtCore/QRandomGenerator>
 #include <QtCore/QSysInfo>
+#include "core/version.h"
 #include <utility>
 
 namespace Noveo {
@@ -25,9 +26,10 @@ const auto kGuid = QByteArray("258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
 QJsonObject ClientInfo() {
 	return {
 		{ "clientName", "NoveoDesktop" },
-		{ "clientVersion", "0.1" },
+		{ "clientVersion", QString::fromLatin1(AppVersionStr) },
 		{ "platform", QSysInfo::productType() },
 		{ "deviceModel", QSysInfo::prettyProductName() },
+		{ "osVersion", QSysInfo::productVersion() },
 	};
 }
 } // namespace

@@ -149,6 +149,25 @@ MTPDocument SessionClient::premiumIconDocument(uint64 id) const {
 		}));
 }
 
+QString SessionClient::nicknameFont(PeerId peer) const {
+    return _profiles.value(peer.value).value("nicknameFont").toString();
+}
+
+void SessionClient::setNicknameFont(QString font, std::function<void(QString)> done) {
+    if (!_auth->authenticated()) { done("NOVEO_DISCONNECTED"); return; }
+    if (!font.isEmpty() && membershipTier().isEmpty()) { done("Silver or Premium is required."); return; }
+    const auto id = --_internalRequest;
+    _actionErrors[id] = done;
+    _pending[id] = {{mtpc_account_updateProfile}, QDateTime::currentMSecsSinceEpoch() + 30000};
+    _deadline.start();
+    wire(id, {{{"type", "update_profile"}, {"nicknameFont", font}}}, {"user_updated"}, [=, this](QJsonObject frame) {
+        _actionErrors.remove(id);
+        users(QJsonArray{frame.value("user").isObject() ? frame.value("user") : QJsonValue(frame)});
+        if (onUpdate) onUpdate(updates({}));
+        done({});
+    });
+}
+
 bool SessionClient::premiumRequest(mtpRequestId id, const mtpBuffer &body) {
 	const auto type = uint32(body.front());
 	const auto handled = {mtpc_account_getDefaultEmojiStatuses,

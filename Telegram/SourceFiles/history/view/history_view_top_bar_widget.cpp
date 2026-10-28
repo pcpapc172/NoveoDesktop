@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "noveo/name_fonts.h"
 #include "history/view/history_view_top_bar_widget.h"
 
 #include "history/history.h"
@@ -667,7 +668,7 @@ void TopBarWidget::paintTopBar(Painter &p) {
 		if (_titleNameVersion < namePeer->nameVersion()) {
 			_titleNameVersion = namePeer->nameVersion();
 			_title.setText(
-				st::msgNameStyle,
+                Noveo::NameStyle(st::msgNameStyle, namePeer),
 				TopBarNameText(namePeer, _activeChat),
 				Ui::NameTextOptions());
 		}

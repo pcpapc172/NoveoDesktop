@@ -1,5 +1,26 @@
 <RCC>
   <qresource prefix="/gui">
+    <file alias="noveo/fonts/noveo_bradhitc.ttf">../../fonts/noveo/noveo_bradhitc.ttf</file>
+    <file alias="noveo/fonts/noveo_freescpt.ttf">../../fonts/noveo/noveo_freescpt.ttf</file>
+    <file alias="noveo/fonts/noveo_f_majik.ttf">../../fonts/noveo/noveo_f_majik.ttf</file>
+    <file alias="noveo/fonts/noveo_impact.ttf">../../fonts/noveo/noveo_impact.ttf</file>
+    <file alias="noveo/fonts/noveo_npidivani.ttf">../../fonts/noveo/noveo_npidivani.ttf</file>
+    <file alias="noveo/fonts/noveo_papyrus.ttf">../../fonts/noveo/noveo_papyrus.ttf</file>
+    <file alias="noveo/fonts/noveo_comicpapyrus.ttf">../../fonts/noveo/noveo_comicpapyrus.ttf</file>
+    <file alias="noveo/fonts/noveo_comic.ttf">../../fonts/noveo/noveo_comic.ttf</file>
+    <file alias="noveo/fonts/noveo_comicbold.ttf">../../fonts/noveo/noveo_comicbold.ttf</file>
+    <file alias="noveo/fonts/noveo_diploma.ttf">../../fonts/noveo/noveo_diploma.ttf</file>
+    <file alias="noveo/fonts/noveo_jamburafood.otf">../../fonts/noveo/noveo_jamburafood.otf</file>
+    <file alias="noveo/fonts/noveo_minecraftseven.ttf">../../fonts/noveo/noveo_minecraftseven.ttf</file>
+    <file alias="noveo/fonts/noveo_minecraftten.ttf">../../fonts/noveo/noveo_minecraftten.ttf</file>
+    <file alias="noveo/fonts/noveo_pricedownbl.otf">../../fonts/noveo/noveo_pricedownbl.otf</file>
+    <file alias="noveo/fonts/noveo_reeniebeanie.ttf">../../fonts/noveo/noveo_reeniebeanie.ttf</file>
+    <file alias="noveo/fonts/noveo_roguepunk.ttf">../../fonts/noveo/noveo_roguepunk.ttf</file>
+    <file alias="noveo/fonts/noveo_tanjiro.otf">../../fonts/noveo/noveo_tanjiro.otf</file>
+    <file alias="noveo/fonts/noveo_welcotewelcome.otf">../../fonts/noveo/noveo_welcotewelcome.otf</file>
+    <file alias="noveo/fonts/noveo_nastaliq.ttf">../../fonts/noveo/noveo_nastaliq.ttf</file>
+    <file alias="noveo/fonts/noveo_irani_sans.ttf">../../fonts/noveo/noveo_irani_sans.ttf</file>
+    <file alias="noveo/fonts/noveo_irani_sansbold.ttf">../../fonts/noveo/noveo_irani_sansbold.ttf</file>
     <file alias="noveo/call.html">../../noveo/call.html</file>
     <file alias="noveo/livekit-client.umd.min.js">../../noveo/livekit-client.umd.min.js</file>
     <file alias="art/background.tgv">../../art/background.tgv</file>

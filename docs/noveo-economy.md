@@ -17,3 +17,18 @@ Custom nickname-font rendering and the broader Telegram Premium feature set are 
 `python3 tests/noveo/test_economy_client.py` compiles the production adapter and tests it against isolated TLS/HTTP/WebSocket fixtures. It covers signed fractional balances, newer-live/older-HTTP ordering, reentrant wallet requests, filtered/deduplicated/paged history, account isolation, member-state merges, status document encoding, profile colors and clears, invalid status rejection, Stars success/failure, live balances and exact receipt multipart from local files and portal bytes. It makes no production purchases or payment submissions.
 
 The existing feature fixture covers gifts, sales, claiming, reactions, bot keyboards, notifications and calls. Full platform builds and user acceptance remain separate checks.
+
+
+Message uploads now use the same plan boundaries as the server: Free 50 MiB,
+Silver 100 MiB, Premium 500 MiB. Oversized prepared attachments are rejected
+before upload, and the transport checks again before posting the multipart body.
+Receipt images retain their separate 15 MiB cap.
+
+Premium Bot checkout accepts Silver, Premium, and Silver-to-Premium upgrades,
+with the requested tier preserved through receipt submission. Settings → Name
+font exposes the shared Noveo catalog for Silver/Premium. Name fonts render in
+chat-list rows, search rows, conversation headers, and group sender labels, and
+profile updates invalidate the native name caches. Bitmap-only catalog fonts
+use the system monospace family, matching Android's fallback.
+
+Login device information reports the build version and actual operating system.

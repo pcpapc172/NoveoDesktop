@@ -91,6 +91,11 @@ QString SessionClient::membershipTier() const {
 	return (tier == "premium" || tier == "silver") ? tier : QString();
 }
 
+qint64 SessionClient::uploadLimitBytes() const {
+    const auto tier = membershipTier();
+    return (tier == "premium" ? 500LL : tier == "silver" ? 100LL : 50LL) * 1024 * 1024;
+}
+
 MTPUser SessionClient::premiumBotUser() {
 	const auto raw = QString("00000000-0000-0000-0000-000000000007");
 	users(QJsonArray{QJsonObject{{"userId", raw},
@@ -346,7 +351,7 @@ void SessionClient::createStarsGiveaway(
 }
 
 void SessionClient::submitPremiumReceipt(
-	QString path, std::function<void(QString)> done, QByteArray content) {
+	QString path, std::function<void(QString)> done, QByteArray content, QString plan) {
 	const auto multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 	auto file = static_cast<QIODevice *>(nullptr);
 	if (content.isEmpty()) {
@@ -374,7 +379,7 @@ void SessionClient::submitPremiumReceipt(
 	auto tier = QHttpPart();
 	tier.setHeader(
 		QNetworkRequest::ContentDispositionHeader, "form-data; name=\"tier\"");
-	tier.setBody("premium");
+	tier.setBody((plan == "silver" || plan == "premium_upgrade") ? plan.toUtf8() : QByteArray("premium"));
 	multipart->append(tier);
 	auto receipt = QHttpPart();
 	receipt.setHeader(QNetworkRequest::ContentDispositionHeader,

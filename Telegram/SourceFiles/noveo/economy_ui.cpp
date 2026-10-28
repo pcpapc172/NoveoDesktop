@@ -1,4 +1,5 @@
 #include "noveo/economy_ui.h"
+#include "noveo/name_fonts.h"
 
 #include "api/api_common.h"
 #include "apiwrap.h"
@@ -39,7 +40,7 @@ QString FormatStars(qint64 amount) {
 }
 
 void ReceiptBox(not_null<Ui::GenericBox *> box,
-	not_null<Window::SessionController *> controller) {
+	not_null<Window::SessionController *> controller, QString tier) {
 	struct State {
 		QString path;
 		QByteArray content;
@@ -102,7 +103,7 @@ void ReceiptBox(not_null<Ui::GenericBox *> box,
 						box->closeBox();
 					}
 				}),
-			state->content);
+			state->content, tier);
 	});
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
@@ -185,12 +186,49 @@ void ShowPremium(not_null<Window::SessionController *> controller) {
 	controller->session().api().sendMessage(std::move(message));
 }
 
-void ShowPremiumCheckout(not_null<Window::SessionController *> controller) {
+void ShowNameFonts(not_null<Window::SessionController *> controller) {
+    const auto client = controller->session().account().noveoApi();
+    if (!client) return;
+    if (client->membershipTier().isEmpty()) {
+        controller->showToast(tr::lng_noveo_name_font_requires_plan(tr::now));
+        return;
+    }
+    const auto weak = base::make_weak(controller);
+    controller->show(Box([=](not_null<Ui::GenericBox *> box) {
+        box->setTitle(tr::lng_noveo_name_font());
+        box->setMaxHeight(st::boxMaxListHeight);
+        const auto group = std::make_shared<Ui::RadiobuttonGroup>();
+        const auto pending = box->lifetime().make_state<bool>(false);
+        const auto current = client->nicknameFont(peerFromUser(NativeUserId(client->selfId())));
+        const auto &fonts = NameFonts();
+        for (auto i = 0; i < fonts.size(); ++i) {
+            box->addRow(object_ptr<Ui::Radiobutton>(box, group, i, fonts[i].label, st::defaultCheckbox));
+            if (fonts[i].id == current) group->setValue(i);
+        }
+        box->addButton(tr::lng_settings_save(), [=] {
+            if (*pending || !weak) return;
+            const auto index = group->current();
+            if (index < 0 || index >= NameFonts().size()) return;
+            *pending = true;
+            client->setNicknameFont(NameFonts()[index].id, crl::guard(box, [=](QString error) {
+                *pending = false;
+                if (!weak) return;
+                if (error.isEmpty()) box->closeBox();
+                else weak->showToast(error);
+            }));
+        });
+        box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
+    }));
+}
+
+void ShowPremiumCheckout(not_null<Window::SessionController *> controller, QString tier) {
 	const auto weak = base::make_weak(controller);
 	controller->show(Box([=](not_null<Ui::GenericBox *> box) {
 		box->setTitle(tr::lng_noveo_premium_checkout());
 		box->addRow(object_ptr<Ui::FlatLabel>(
-			box, tr::lng_noveo_premium_checkout_about(), st::boxLabel));
+			box, tr::lng_noveo_subscription_checkout_about(tr::now,
+                lt_plan, tier == "silver" ? u"Silver"_q : tier == "premium_upgrade" ? u"Premium upgrade"_q : u"Premium"_q,
+                lt_amount, tier == "silver" ? u"35,000"_q : tier == "premium_upgrade" ? u"15,000"_q : u"50,000"_q), st::boxLabel));
 		const auto tos = box->addRow(object_ptr<Ui::Checkbox>(
 			box, tr::lng_noveo_premium_accept(tr::now), false));
 		box->addButton(tr::lng_continue(), [=] {
@@ -203,7 +241,7 @@ void ShowPremiumCheckout(not_null<Window::SessionController *> controller) {
 				return;
 			}
 			box->closeBox();
-			window->show(Box(ReceiptBox, not_null(window)));
+			window->show(Box(ReceiptBox, not_null(window), tier));
 		});
 		box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 	}));

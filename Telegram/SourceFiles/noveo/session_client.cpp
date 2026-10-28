@@ -753,6 +753,9 @@ void SessionClient::users(const QJsonArray &profiles, bool contact) {
 		}
 		if (contact) merged.insert("isContact", true);
 		_profiles[NativeUserId(RawId(profile)).bare] = merged;
+        if (onNicknameFont && profile.contains("nicknameFont")) {
+            onNicknameFont(NativeUserId(RawId(profile)), merged.value("nicknameFont").toString());
+        }
 		const auto native = user(merged, contact);
 		_users[native.c_user().vid().v] = native;
 	}
@@ -1921,6 +1924,12 @@ void SessionClient::upload(
 		reject();
 		return;
 	}
+    if (path == "/upload/file" && staged->bytes > uploadLimitBytes()) {
+        _uploads.remove(fileId);
+        cancel(id);
+        fail(id, "NOVEO_UPLOAD_TOO_LARGE");
+        return;
+    }
 	const auto multipart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 	const auto file = new QTemporaryFile(multipart);
 	if (!file->open()) {
@@ -1994,6 +2003,7 @@ void SessionClient::upload(
 	}
 	const auto authorization = _auth->authorization();
 	QNetworkRequest request(_apiEndpoint.resolved(QUrl(path)));
+    request.setRawHeader("X-File-Size", QByteArray::number(file->size()));
 	request.setRawHeader("X-User-ID", _self.toUtf8());
 	request.setRawHeader("X-Auth-Token", authorization.value("token").toString().toUtf8());
 	request.setRawHeader(

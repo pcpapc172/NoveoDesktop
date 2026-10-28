@@ -599,6 +599,11 @@ void Account::prepareNoveoClient() {
 		session->data().chatsListChanged(nullptr);
 		session->api().requestMoreDialogsIfNeeded();
 	};
+    _noveoApi->onNicknameFont = [this](UserId id, QString font) {
+        if (const auto session = maybeSession()) {
+            session->data().user(id)->setNoveoNicknameFont(std::move(font));
+        }
+    };
 	_noveoApi->onAvatar = [this](PeerId id, const QUrl &url) {
 		const auto session = maybeSession();
 		if (!session) return;

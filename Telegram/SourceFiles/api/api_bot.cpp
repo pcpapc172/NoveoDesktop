@@ -88,9 +88,9 @@ void SendBotCallbackData(
 		sendData = button->data;
 	}
 	const auto withPassword = password.has_value();
-	if (session->account().noveoApi() && sendData == "pb:pay"
+	if (session->account().noveoApi() && (sendData == "pb:pay" || sendData == "pb:pay:silver" || sendData == "pb:pay:premium_upgrade")
 		&& history->peer->id == peerFromUser(Noveo::NativeUserId("00000000-0000-0000-0000-000000000007"))) {
-		Noveo::ShowPremiumCheckout(controller);
+		Noveo::ShowPremiumCheckout(controller, sendData == "pb:pay:silver" ? u"silver"_q : sendData == "pb:pay:premium_upgrade" ? u"premium_upgrade"_q : u"premium"_q);
 		return;
 	}
 	if (withPassword) {

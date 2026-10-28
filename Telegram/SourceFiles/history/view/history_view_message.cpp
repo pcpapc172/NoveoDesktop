@@ -5,6 +5,7 @@ the official desktop application for the Telegram messaging service.
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
+#include "noveo/name_fonts.h"
 #include "history/view/history_view_message.h"
 
 #include "api/api_suggest_post.h"
@@ -5496,7 +5497,7 @@ void Message::validateFromNameText(PeerData *from) const {
 	if (_fromNameVersion < version) {
 		_fromNameVersion = version;
 		_fromName.setText(
-			st::msgNameStyle,
+            Noveo::NameStyle(st::msgNameStyle, from),
 			from->name(),
 			Ui::NameTextOptions());
 	}

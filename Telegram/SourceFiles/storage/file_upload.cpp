@@ -29,6 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/mime_type.h"
 #include "media/media_video_encode.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "noveo/session_client.h"
 #include "storage/storage_account.h"
 #include "apiwrap.h"
 
@@ -383,6 +385,16 @@ void Uploader::upload(
 				file->videoCover->photoThumbs);
 		}
 	}
+    if (const auto client = session().account().noveoApi(); client && !preparing) {
+        const auto size = (file->type == SendMediaType::Photo) ? file->partssize : file->filesize;
+        if (size > client->uploadLimitBytes()) {
+            Ui::Toast::Show(tr::lng_noveo_upload_limit(tr::now,
+                lt_size, QString::number(client->uploadLimitBytes() / (1024 * 1024))));
+            if (file->type == SendMediaType::Photo) _photoFailed.fire_copy(itemId);
+            else _documentFailed.fire_copy(itemId);
+            return;
+        }
+    }
 	_queue.push_back({ itemId, file });
 	if (preparing) {
 		_queue.back().preparing = true;

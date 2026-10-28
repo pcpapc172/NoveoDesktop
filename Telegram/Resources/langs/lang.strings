@@ -8849,3 +8849,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_noveo_receipt_choose" = "Choose receipt image";
 "lng_noveo_receipt_selected" = "Receipt image selected";
 "lng_noveo_receipt_pending" = "Receipt submitted. Your payment is awaiting review.";
+
+"lng_noveo_upload_limit" = "File is too large. Your upload limit is {size} MB.";
+
+"lng_noveo_subscription_checkout_about" = "Noveo {plan}: {amount} IRT. Submit a receipt for manual review. Membership activates after approval.";
+
+"lng_noveo_name_font" = "Name font";
+"lng_noveo_name_font_requires_plan" = "Custom name fonts are available with Noveo Silver and Premium.";

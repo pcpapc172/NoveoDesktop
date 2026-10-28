@@ -86,7 +86,7 @@ async def main():
                 assert part.name not in parts
                 parts[part.name] = bytes(await part.read())
                 if part.name == "receipt": assert part.filename.endswith(".png")
-            assert parts == {"tier": b"premium", "receipt": png}, parts.keys()
+            assert parts == {"tier": [b"silver", b"premium_upgrade"][seen["receipts"]], "receipt": png}, parts.keys()
             seen["receipts"] += 1
             return web.json_response({"success": True, "request": {"status": "open"}})
         async def websocket(request):
@@ -103,7 +103,7 @@ async def main():
                     await socket.send_json({"type": "chat_history", "chats": [{"chatId": "dm", "chatType": "private", "members": ["test-user", "other"], "messages": []}]})
                 elif frame["type"] == "update_profile":
                     fields = {k: v for k, v in frame.items() if k != "type"}
-                    assert fields and set(fields) <= {"premiumStarIcon", "premiumStarIcons", "profileSkin"}
+                    assert fields and set(fields) <= {"premiumStarIcon", "premiumStarIcons", "profileSkin", "nicknameFont"}
                     for key in ["premiumStarIcon", "premiumStarIcons"]:
                         if fields.get(key): assert fields[key]["url"] in ["/icon.png", "/icon.tgs"]
                     if fields.get("profileSkin"):
@@ -137,7 +137,7 @@ async def main():
             assert result == 0, result
             assert seen["wallet"] >= 5 and seen["assets"] == 1, seen
             assert {k: seen[k] for k in ["customization", "giveaway", "rejected", "receipts"]} == {
-                "customization": 4, "giveaway": 1, "rejected": 1, "receipts": 2}, seen
+                "customization": 5, "giveaway": 1, "rejected": 1, "receipts": 2}, seen
             print("PASS fractional wallet balance, filtered/deduplicated/paged transaction history, self-account isolation, no topups, Premium/Silver/partial membership, status icons/documents, profile colors/clears, invalid emoji rejection, Stars giveaway/insufficient balance, live balance, and exact local/portal receipt multipart")
         finally:
             await runner.cleanup()
