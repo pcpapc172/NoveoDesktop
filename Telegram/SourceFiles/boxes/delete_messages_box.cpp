@@ -243,24 +243,6 @@ void DeleteMessagesBox::prepare() {
 	_text.create(this, rpl::single(std::move(details)), st::boxLabel);
 	_text->resizeToWidth(st::boxWidth - rect::m::sum::h(st::boxPadding));
 
-	if (_wipeHistoryJustClear && _wipeHistoryPeer) {
-		const auto validator = TTLMenu::TTLValidator(
-			uiShow(),
-			_wipeHistoryPeer);
-		if (validator.can()) {
-			_wipeHistoryPeer->updateFull();
-			_autoDeleteSettings.create(
-				this,
-				(_wipeHistoryPeer->messagesTTL()
-					? tr::lng_edit_auto_delete_settings(tr::now)
-					: tr::lng_enable_auto_delete(tr::now)),
-				st::boxLinkButton);
-			_autoDeleteSettings->setClickedCallback([=] {
-				validator.showBox();
-			});
-		}
-	}
-
 	if (canDelete) {
 		addButton(
 			deleteText->value(),

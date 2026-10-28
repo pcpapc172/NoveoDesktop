@@ -1745,21 +1745,6 @@ Section DetailsFiller::makeInfo() {
 				user->session().createInternalLinkFull(username)));
 		}, usernameLine.text->lifetime());
 
-		const auto qrButton = Ui::CreateChild<Ui::IconButton>(
-			usernameLine.text->parentWidget(),
-			st::infoProfileLabeledButtonQr);
-		qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-		UsernamesValue(_peer) | rpl::on_next([=](const auto &u) {
-			qrButton->setVisible(!u.empty());
-		}, qrButton->lifetime());
-		const auto rightSkip = st::infoProfileLabeledButtonQrRightSkip;
-		fitLabelToButton(qrButton, usernameLine.text, rightSkip);
-		fitLabelToButton(qrButton, usernameLine.subtext, rightSkip);
-		qrButton->setClickedCallback([=, show = controller->uiShow()] {
-			Ui::DefaultShowFillPeerQrBoxCallback(show, user);
-			return false;
-		});
-
 		if (!user->isBot()) {
 			tracker.track(result->add(
 				CreateBirthday(result, controller, user),

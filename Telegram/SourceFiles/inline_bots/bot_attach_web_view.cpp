@@ -2985,8 +2985,8 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 		Fn<Api::SendAction()> actionFactory,
 		Fn<SendMenu::Details()> sendMenuDetails,
 		Fn<void(bool)> attach,
-		Fn<TextWithTags()> composeFieldText,
-		Fn<void()> composeFieldMigrated) {
+		Fn<TextWithTags()>,
+		Fn<void()>) {
 	auto result = std::make_unique<Ui::DropdownMenu>(
 		parent,
 		st::dropdownMenuWithIcons);
@@ -3028,36 +3028,6 @@ std::unique_ptr<Ui::DropdownMenu> MakeAttachBotsMenu(
 				source,
 				sendMenuDetails());
 		}, &st::menuIconCreatePoll);
-	}
-	if (peer->canCreateTodoLists(false)) {
-		++minimal;
-		raw->addAction(tr::lng_todo_menu_item(tr::now), [=] {
-			const auto action = actionFactory();
-			const auto source = action.options.scheduled
-				? Api::SendType::Scheduled
-				: Api::SendType::Normal;
-			Window::PeerMenuCreateTodoList(
-				controller,
-				peer,
-				action.replyTo,
-				action.options.suggest,
-				source,
-				sendMenuDetails());
-		}, &st::menuIconCreateTodoList);
-	}
-	if (Iv::Editor::CanAuthorRichMessages(&controller->session())
-		&& Data::CanSendAnyOf(peer, ChatRestriction::SendOther, false)) {
-		raw->addAction(tr::lng_article_menu_item(tr::now), [=] {
-			const auto action = actionFactory();
-			const auto details = sendMenuDetails();
-			Iv::Editor::ShowComposeBox(
-				controller,
-				peer,
-				action,
-				details,
-				composeFieldText ? composeFieldText() : TextWithTags(),
-				composeFieldMigrated);
-		}, &st::menuIconArticle);
 	}
 	const auto session = &controller->session();
 	const auto locationType = ChatRestriction::SendOther;

@@ -3786,10 +3786,13 @@ void TopBar::updateStoryOutline(std::optional<QColor> edgeColor) {
 		return;
 	}
 
-	const auto hasActiveStories = (_source == Source::Preview)
+	const auto hideUserStories = user && (_source == Source::Profile);
+	const auto hasActiveStories = hideUserStories
+		? false
+		: (_source == Source::Preview)
 		? true
 		: (user ? user->hasActiveStories() : channel->hasActiveStories());
-	const auto hasLiveStories = (_source == Source::Preview)
+	const auto hasLiveStories = (hideUserStories || _source == Source::Preview)
 		? false
 		: (user ? user->hasActiveVideoStream() : false);
 

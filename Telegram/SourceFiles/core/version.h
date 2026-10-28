@@ -20,9 +20,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 // used in Updater.cpp and Setup.iss for Windows
 constexpr auto AppId = "{53F49750-6209-4FBF-9CA8-7A333C87D1ED}"_cs;
 constexpr auto AppNameOld = "Telegram Win (Unofficial)"_cs;
-constexpr auto AppName = "Telegram Desktop"_cs;
+constexpr auto AppName = "Noveo Desktop"_cs;
 constexpr auto AppFile = "Telegram"_cs;
-constexpr auto AppVersion = 7002010;
-constexpr auto AppVersionStr = "7.2.10";
+constexpr auto AppVersion = 7002011;
+constexpr auto AppVersionStr = "1.0.1";
 constexpr auto AppBetaVersion = true;
 constexpr auto AppAlphaVersion = TDESKTOP_ALPHA_VERSION;

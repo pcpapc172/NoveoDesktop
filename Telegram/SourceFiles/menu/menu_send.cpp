@@ -723,12 +723,13 @@ FillMenuResult FillSendMenu(
 		std::optional<QPoint> desiredPositionOverride) {
 	const auto type = details.type;
 	const auto sending = (type != Type::Disabled);
-	const auto empty = !sending
+	const auto empty = (type != Type::Reminder)
 		&& (details.spoiler == SpoilerState::None)
 		&& (details.caption == CaptionState::None)
 		&& (details.photoQuality == PhotoQualityState::None)
 		&& (details.cover == CoverState::None)
-		&& !details.price.has_value();
+		&& !details.price.has_value()
+		&& !(sending && maybeShow && details.effectAllowed);
 	if (empty || !action) {
 		return FillMenuResult::Skipped;
 	} else if (type == Type::EditCommentPrice) {
@@ -744,30 +745,15 @@ FillMenuResult FillSendMenu(
 		? *iconsOverride
 		: st::defaultComposeIcons;
 
-	if (sending && type != Type::Reminder) {
+
+	if (sending && type == Type::Reminder) {
 		menu->addAction(
-			tr::lng_send_silent_message(tr::now),
-			[=] { action({ Api::SendOptions{ .silent = true } }, details); },
-			&icons.menuMute);
-	}
-	if (sending && type != Type::SilentOnly) {
-		menu->addAction(
-			((type == Type::Reminder)
-				? tr::lng_reminder_message(tr::now)
-				: tr::lng_schedule_message(tr::now)),
+			tr::lng_reminder_message(tr::now),
 			[=] { action({ .type = ActionType::Schedule }, details); },
 			&icons.menuSchedule);
 	}
-	if (sending && type == Type::ScheduledToUser) {
-		menu->addAction(
-			tr::lng_scheduled_send_until_online(tr::now),
-			[=] { action(
-				{ Api::DefaultSendWhenOnlineOptions() },
-				details); },
-			&icons.menuWhenOnline);
-	}
 
-	if ((type != Type::Disabled)
+	if ((type == Type::Reminder)
 		&& ((details.spoiler != SpoilerState::None)
 			|| (details.caption != CaptionState::None)
 			|| (details.photoQuality != PhotoQualityState::None)

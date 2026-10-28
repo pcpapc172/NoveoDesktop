@@ -15,7 +15,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peer_list_controllers.h"
 #include "boxes/premium_preview_box.h"
 #include "calls/group/calls_group_common.h"
-#include "calls/calls_box_controller.h"
 #include "calls/calls_instance.h"
 #include "core/application.h"
 #include "core/click_handler_types.h"
@@ -384,7 +383,7 @@ MainMenu::MainMenu(
 	parentResized();
 
 	_telegram->setMarkedText(tr::link(
-		u"Telegram Desktop"_q,
+		u"Noveo Desktop"_q,
 		u"https://desktop.telegram.org"_q));
 	_telegram->setLinksTrusted();
 	// The canary version is too long for the "Version {version}" form.
@@ -704,12 +703,6 @@ void MainMenu::setupMenu() {
 			{ &st::menuIconUserShow }
 		)->setClickedCallback([=] {
 			controller->show(PrepareContactsBox(controller));
-		});
-		addAction(
-			tr::lng_menu_calls(),
-			{ &st::menuIconPhone }
-		)->setClickedCallback([=] {
-			::Calls::ShowCallsBox(controller);
 		});
 		addAction(
 			tr::lng_saved_messages(),

@@ -39,7 +39,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_slide_animation.h"
 #include "boxes/peer_list_box.h"
 #include "ui/boxes/confirm_box.h"
-#include "ui/boxes/peer_qr_box.h"
 #include "main/main_session.h"
 #include "mtproto/mtproto_config.h"
 #include "data/data_download_manager.h"
@@ -462,21 +461,6 @@ void WrapWidget::setupTopBarMenuToggle() {
 			button->addClickHandler([=] {
 				_controller->showSettings(::Settings::Search::Id());
 			});
-		} else if (section.settingsType() == ::Settings::InformationId()) {
-			const auto controller = _controller->parentController();
-			const auto self = controller->session().user();
-			if (!self->username().isEmpty()) {
-				const auto show = controller->uiShow();
-				const auto &st = (wrap() == Wrap::Layer)
-					? st::infoLayerTopBarQr
-					: st::infoTopBarQr;
-				const auto button = _topBar->addButton(
-					base::make_unique_q<Ui::IconButton>(_topBar, st));
-				button->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-				button->addClickHandler([show, self] {
-					Ui::DefaultShowFillPeerQrBoxCallback(show, self);
-				});
-			}
 		}
 		setupShortcuts();
 	} else if (key.storiesPeer()

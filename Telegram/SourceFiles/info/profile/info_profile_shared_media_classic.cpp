@@ -341,7 +341,9 @@ object_ptr<Ui::SlideWrap<Ui::RpWidget>> SetupSharedMediaClassic(
 	};
 
 	if (!topic) {
-		addStoriesButton(peer, st::infoIconMediaStories);
+		if (!peer->isUser()) {
+			addStoriesButton(peer, st::infoIconMediaStories);
+		}
 		addPeerGiftsButton(peer, st::infoIconMediaGifts);
 		addSavedSublistButton(peer, st::infoIconMediaSaved);
 	}

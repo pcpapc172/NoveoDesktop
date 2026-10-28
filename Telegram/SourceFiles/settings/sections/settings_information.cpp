@@ -416,158 +416,12 @@ not_null<Ui::SettingsButton*> AddRow(
 	return wrap;
 }
 
-void SetupBirthday(
-		not_null<Ui::VerticalLayout*> container,
-		not_null<Window::SessionController*> controller,
-		not_null<UserData*> self,
-		InformationHighlightTargets *targets) {
-	const auto session = &self->session();
-
-	Ui::AddSkip(container);
-
-	auto value = rpl::combine(
-		Info::Profile::BirthdayValue(self),
-		tr::lng_settings_birthday_add()
-	) | rpl::map([](Data::Birthday birthday, const QString &add) {
-		const auto text = Data::BirthdayText(birthday);
-		return TextWithEntities{ !text.isEmpty() ? text : add };
-	});
-	const auto edit = [=] {
-		Core::App().openInternalUrl(
-			u"internal:edit_birthday"_q,
-			QVariant::fromValue(ClickHandlerContext{
-				.sessionWindow = base::make_weak(controller),
-			}));
-	};
-	const auto birthdayButton = AddRow(
-		container,
-		tr::lng_settings_birthday_label(),
-		std::move(value),
-		tr::lng_mediaview_copy(tr::now),
-		edit,
-		{ &st::menuIconGiftPremium });
-	if (targets) {
-		targets->birthday = birthdayButton;
-	}
-
-	const auto key = Api::UserPrivacy::Key::Birthday;
-	session->api().userPrivacy().reload(key);
-	auto isExactlyContacts = session->api().userPrivacy().value(
-		key
-	) | rpl::map([=](const Api::UserPrivacy::Rule &value) {
-		return (value.option == Api::UserPrivacy::Option::Contacts)
-			&& value.always.peers.empty()
-			&& !value.always.premiums
-			&& value.never.peers.empty();
-	}) | rpl::distinct_until_changed();
-
-	Ui::AddSkip(container);
-	Ui::AddDividerText(container, rpl::conditional(
-		std::move(isExactlyContacts),
-		tr::lng_settings_birthday_contacts(
-			lt_link,
-			tr::lng_settings_birthday_contacts_link(
-				tr::url(u"internal:edit_privacy_birthday"_q)),
-			tr::marked),
-		tr::lng_settings_birthday_about(
-			lt_link,
-			tr::lng_settings_birthday_about_link(
-				tr::url(u"internal:edit_privacy_birthday"_q)),
-			tr::marked)));
-}
-
-void SetupChatAutomation(
-		not_null<Ui::VerticalLayout*> container,
-		not_null<Window::SessionController*> controller,
-		not_null<UserData*> self,
-		InformationHighlightTargets *targets) {
-	const auto session = &self->session();
-	session->data().chatbots().preload();
-
-	auto label = session->data().chatbots().value(
-	) | rpl::map([](const Data::ChatbotsSettings &value) {
-		if (!value.bot) {
-			return tr::lng_settings_chat_automation_off(tr::now);
-		}
-		const auto username = value.bot->username();
-		return username.isEmpty()
-			? value.bot->name()
-			: ('@' + username);
-	});
-
-	const auto &st = st::settingsButton;
-	auto title = tr::lng_settings_chat_automation_label();
-	const auto button = AddButtonWithLabel(
-		container,
-		rpl::duplicate(title),
-		std::move(label),
-		st,
-		{ &st::settingsIconChatAutomation });
-
-	button->setClickedCallback([=] {
-		controller->showSettings(Settings::ChatbotsId());
-	});
-
-	{
-		const auto badge = Ui::NewBadge::CreateNewBadge(
-			button,
-			tr::lng_premium_summary_new_badge()).get();
-		rpl::combine(
-			std::move(title),
-			button->widthValue()
-		) | rpl::on_next([=, &st](
-				const QString &text,
-				int width) {
-			const auto space = st.style.font->spacew;
-			const auto left = st.padding.left()
-				+ st.style.font->width(text)
-				+ space;
-			const auto available = width - left - st.padding.right();
-			badge->setVisible(available >= badge->width());
-			if (!badge->isHidden()) {
-				const auto top = st.padding.top()
-					+ st.style.font->ascent
-					- st::settingsPremiumNewBadge.style.font->ascent
-					- st::settingsPremiumNewBadgePadding.top();
-				badge->moveToLeft(left, top, width);
-			}
-		}, badge->lifetime());
-	}
-
-	if (targets) {
-		targets->chatAutomation = button;
-	}
-}
-
-void SetupPersonalChannel(
+void SetupColor(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<Window::SessionController*> controller,
 		not_null<UserData*> self,
 		InformationHighlightTargets *targets) {
 	Ui::AddSkip(container);
-
-	auto value = rpl::combine(
-		Info::Profile::PersonalChannelValue(self),
-		tr::lng_settings_channel_add()
-	) | rpl::map([](ChannelData *channel, const QString &add) {
-		return TextWithEntities{ channel ? channel->name() : add };
-	});
-	const auto edit = [=] {
-		Core::App().openInternalUrl(
-			u"internal:edit_personal_channel"_q,
-			QVariant::fromValue(ClickHandlerContext{
-				.sessionWindow = base::make_weak(controller),
-			}));
-	};
-	const auto channelButton = AddRow(
-		container,
-		tr::lng_settings_channel_label(),
-		std::move(value),
-		tr::lng_mediaview_copy(tr::now),
-		edit,
-		{ &st::menuIconChannel });
-
-	SetupChatAutomation(container, controller, self, targets);
 
 	const auto colorButton = AddPeerColorButton(
 		container,
@@ -575,7 +429,6 @@ void SetupPersonalChannel(
 		self,
 		st::settingsColorButton);
 	if (targets) {
-		targets->channelButton = channelButton;
 		targets->colorButton = colorButton;
 	}
 
@@ -607,29 +460,6 @@ void SetupRows(
 		{ &st::menuIconProfile });
 	if (targets) {
 		targets->name = nameButton;
-	}
-
-	const auto showChangePhone = [=] {
-		controller->show(
-			Ui::MakeInformBox(tr::lng_change_phone_error()));
-		controller->window().activate();
-	};
-	const auto phoneButton = AddRow(
-		container,
-		tr::lng_settings_phone_label(),
-		Info::Profile::PhoneWithSpoilerValue(
-			self,
-			Info::Profile::PhoneValue(self)),
-		tr::lng_profile_copy_phone(tr::now),
-		showChangePhone,
-		{ &st::menuIconPhone },
-		true,
-		[=](not_null<Ui::PopupMenu*> menu) {
-			Info::Profile::AddPhoneSpoilerMenu(menu, self);
-		},
-		&st::menuIconCopy);
-	if (targets) {
-		targets->phone = phoneButton;
 	}
 
 	auto username = Info::Profile::UsernameValue(self);
@@ -1215,13 +1045,6 @@ void BuildInformationSection(SectionBuilder &builder) {
 	});
 	builder.add(nullptr, [] {
 		return SearchEntry{
-			.id = u"edit/phone"_q,
-			.title = tr::lng_settings_phone_label(tr::now),
-			.keywords = { u"phone"_q, u"number"_q, u"mobile"_q },
-		};
-	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
 			.id = u"edit/username"_q,
 			.title = tr::lng_settings_username_label(tr::now),
 			.keywords = { u"username"_q, u"link"_q, u"t.me"_q },
@@ -1232,33 +1055,6 @@ void BuildInformationSection(SectionBuilder &builder) {
 			.id = u"edit/your-color"_q,
 			.title = tr::lng_settings_theme_name_color(tr::now),
 			.keywords = { u"color"_q, u"theme"_q, u"name"_q },
-		};
-	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"edit/channel"_q,
-			.title = tr::lng_settings_channel_label(tr::now),
-			.keywords = { u"channel"_q, u"personal"_q },
-		};
-	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"edit/birthday"_q,
-			.title = tr::lng_settings_birthday_label(tr::now),
-			.keywords = { u"birthday"_q, u"date"_q, u"birth"_q },
-		};
-	});
-	builder.add(nullptr, [] {
-		return SearchEntry{
-			.id = u"edit/chat-automation"_q,
-			.title = tr::lng_settings_chat_automation_label(tr::now),
-			.keywords = {
-				u"chat"_q,
-				u"automation"_q,
-				u"bot"_q,
-				u"chatbot"_q,
-				u"chatbots"_q,
-			},
 		};
 	});
 	builder.add(nullptr, [] {
@@ -1351,8 +1147,7 @@ void Information::setupContent() {
 		SetupPhoto(container, controller, self, &targets);
 		SetupBio(container, self, &targets);
 		SetupRows(container, controller, self, &targets);
-		SetupPersonalChannel(container, controller, self, &targets);
-		SetupBirthday(container, controller, self, &targets);
+		SetupColor(container, controller, self, &targets);
 		SetupAccountsWrap(container, controller, &targets);
 
 		*photo = targets.photo;

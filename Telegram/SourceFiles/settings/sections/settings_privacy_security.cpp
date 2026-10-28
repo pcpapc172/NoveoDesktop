@@ -607,24 +607,6 @@ void BuildSecuritySection(
 
 	session->api().cloudPassword().reload();
 
-	auto ttlLabel = rpl::combine(
-		session->api().selfDestruct().periodDefaultHistoryTTL(),
-		tr::lng_settings_ttl_after_off()
-	) | rpl::map([](int ttl, const QString &none) {
-		return ttl ? Ui::FormatTTL(ttl) : none;
-	});
-
-	builder.addButton({
-		.id = u"security/ttl"_q,
-		.title = tr::lng_settings_ttl_title(),
-		.icon = { &st::menuIconTTL },
-		.label = std::move(ttlLabel),
-		.onClick = [showOther] {
-			showOther(GlobalTTLId());
-		},
-		.keywords = { u"ttl"_q, u"auto-delete"_q, u"timer"_q },
-	});
-
 	builder.add([session, updateTrigger = rpl::duplicate(updateTrigger)](const WidgetContext &ctx) mutable {
 		std::move(updateTrigger) | rpl::on_next([=] {
 			session->api().selfDestruct().reload();

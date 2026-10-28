@@ -622,41 +622,6 @@ void GroupInfoBox::prepare() {
 		[=] { submit(); });
 	addButton(tr::lng_cancel(), [this] { closeBox(); });
 
-	if (_type == Type::Group) {
-		_navigation->session().api().selfDestruct().reload();
-
-		const auto top = addTopButton(st::infoTopBarMenu);
-		const auto menu
-			= top->lifetime().make_state<base::unique_qptr<Ui::PopupMenu>>();
-		top->setClickedCallback([=] {
-			*menu = base::make_unique_q<Ui::PopupMenu>(
-				top,
-				st::popupMenuWithIcons);
-
-			const auto ttl = ttlPeriod();
-			const auto text = tr::lng_manage_messages_ttl_menu(tr::now)
-				+ (ttl ? ('\t' + Ui::FormatTTLTiny(ttl)) : QString());
-			(*menu)->addAction(
-				text,
-				[=, show = uiShow()] {
-					show->showBox(Box(TTLMenu::TTLBox, TTLMenu::Args{
-						.show = show,
-						.startTtl = ttlPeriod(),
-						.about = nullptr,
-						.callback = crl::guard(this, [=](
-								TimeId t,
-								Fn<void()> close) {
-							_ttlPeriod = t;
-							_ttlPeriodOverridden = true;
-							close();
-						}),
-					}));
-				}, &st::menuIconTTL);
-			(*menu)->popup(QCursor::pos());
-			return true;
-		});
-	}
-
 	updateMaxHeight();
 }
 

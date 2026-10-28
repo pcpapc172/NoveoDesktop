@@ -319,7 +319,6 @@ private:
 	void addManageTopic();
 	void addManageChat();
 	void addCreatePoll();
-	void addCreateTodoList();
 	void addThemeEdit();
 	void addToggleNoForwards();
 	void addBlockUser();
@@ -336,7 +335,6 @@ private:
 	void addBotToGroup();
 	void addNewMembers();
 	void addDeleteContact();
-	void addTTLSubmenu(bool addSeparator);
 	void addSendGift();
 	void addCreateTopic();
 	void addViewAsMessages();
@@ -1432,40 +1430,6 @@ void Filler::addCreatePoll() {
 		&st::menuIconCreatePoll);
 }
 
-void Filler::addCreateTodoList() {
-	if (skipCreateActions()) {
-		return;
-	}
-	const auto can = _topic
-		? (_peer->session().premium()
-			&& Data::CanSend(_topic, ChatRestriction::SendPolls))
-		: _peer->canCreateTodoLists();
-	if (!can) {
-		return;
-	}
-	const auto peer = _peer;
-	const auto controller = _controller;
-	const auto source = (_request.section == Section::Scheduled)
-		? Api::SendType::Scheduled
-		: Api::SendType::Normal;
-	const auto replyTo = _request.currentReplyTo;
-	const auto sendMenuDetails = createSendMenuDetails();
-	const auto suggest = _request.currentSuggest;
-	auto callback = [=] {
-		PeerMenuCreateTodoList(
-			controller,
-			peer,
-			replyTo,
-			suggest,
-			source,
-			sendMenuDetails);
-	};
-	_addAction(
-		tr::lng_todo_create(tr::now),
-		std::move(callback),
-		&st::menuIconCreateTodoList);
-}
-
 void Filler::addThemeEdit() {
 	if (_peer->isVerifyCodes() || _peer->isRepliesChat()) {
 		return;
@@ -1646,26 +1610,6 @@ void Filler::addToggleNoForwards() {
 		peer->session().saveSettingsDelayed();
 		ShowDisableSharingBox(controller, peer, toggleNoForwards);
 	}, disabledNow ? &st::menuIconShareOn : &st::menuIconShareOff);
-}
-
-void Filler::addTTLSubmenu(bool addSeparator) {
-	if (_thread->asTopic() || !_peer || _peer->isMonoforum()) {
-		return; // #TODO later forum
-	}
-	const auto validator = TTLMenu::TTLValidator(
-		_controller->uiShow(),
-		_peer);
-	if (!validator.can()) {
-		return;
-	}
-	const auto text = tr::lng_manage_messages_ttl_menu(tr::now)
-		+ (_peer->messagesTTL()
-			? ('\t' + Ui::FormatTTLTiny(_peer->messagesTTL()))
-			: QString());
-	_addAction(text, [=] { validator.showBox(); }, validator.icon());
-	if (addSeparator) {
-		_addAction(PeerMenuCallback::Args{ .isSeparator = true });
-	}
 }
 
 void Filler::addSendGift() {
@@ -1935,7 +1879,6 @@ void Filler::fillHistoryActions() {
 	addSupportInfo();
 	addBoostChat();
 	addCreatePoll();
-	addCreateTodoList();
 	addThemeEdit();
 	addToggleNoForwards();
 	addViewDiscussion();
@@ -1949,7 +1892,6 @@ void Filler::fillHistoryActions() {
 }
 
 void Filler::fillProfileActions() {
-	addTTLSubmenu(true);
 	addSupportInfo();
 	addNewContact();
 	addShareContact();
@@ -1984,14 +1926,12 @@ void Filler::fillRepliesActions() {
 	}
 	addBoostChat();
 	addCreatePoll();
-	addCreateTodoList();
 	addToggleTopicClosed();
 	addDeleteTopic();
 }
 
 void Filler::fillScheduledActions() {
 	addCreatePoll();
-	addCreateTodoList();
 }
 
 void Filler::fillWelcomeMessagesActions() {

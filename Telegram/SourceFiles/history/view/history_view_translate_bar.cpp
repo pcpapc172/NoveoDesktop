@@ -252,7 +252,9 @@ TranslateBar::TranslateBar(
 		return (shown == _shadow->isHidden());
 	}));
 
-	setup(history);
+	if (!history->peer->isUser()) {
+		setup(history);
+	}
 }
 
 TranslateBar::~TranslateBar() = default;

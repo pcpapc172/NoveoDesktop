@@ -115,9 +115,6 @@ object_ptr<Ui::BoxContent> PrepareContactsBox(
 
 		const auto state = box->lifetime().make_state<State>();
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
-		box->addLeftButton(
-			tr::lng_profile_add_contact(),
-			[=] { window->showAddContact(); });
 		state->toggleSort = box->addTopButton(st::contactsSortButton, [=] {
 			const auto online = (state->mode.current() == Mode::Online);
 			const auto mode = online ? Mode::Alphabet : Mode::Online;

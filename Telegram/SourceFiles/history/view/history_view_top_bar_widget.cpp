@@ -1356,9 +1356,6 @@ void TopBarWidget::updateControlsVisibility() {
 	const auto hasPollsMenu = (_activeChat.key.peer()
 		&& _activeChat.key.peer()->canCreatePolls())
 		|| (topic && Data::CanSend(topic, ChatRestriction::SendPolls));
-	const auto hasTodoListsMenu = (_activeChat.key.peer()
-		&& _activeChat.key.peer()->canCreateTodoLists())
-		|| (topic && Data::CanSend(topic, ChatRestriction::SendPolls));
 	const auto hasTopicMenu = [&] {
 		if (!topic || section != Section::Replies) {
 			return false;
@@ -1377,11 +1374,11 @@ void TopBarWidget::updateControlsVisibility() {
 	const auto hasMenu = (section == Section::History)
 		? !_activeChat.key.folder()
 		: (section == Section::Scheduled)
-		? (hasPollsMenu || hasTodoListsMenu)
+		? hasPollsMenu
 		: (section == Section::WelcomeMessages)
 		? true
 		: (section == Section::Replies)
-		? (hasPollsMenu || hasTodoListsMenu || hasTopicMenu)
+		? (hasPollsMenu || hasTopicMenu)
 		: (section == Section::ChatsList)
 		? (_activeChat.key.folder()
 			|| (_activeChat.key.peer() && _activeChat.key.peer()->isForum())

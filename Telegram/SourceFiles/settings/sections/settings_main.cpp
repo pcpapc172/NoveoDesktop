@@ -32,7 +32,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "info/profile/info_profile_badge.h"
 #include "info/profile/info_profile_emoji_status_panel.h"
-#include "info/profile/info_profile_phone_menu.h"
 #include "info/profile/info_profile_values.h"
 #include "info/stories/info_stories_widget.h"
 #include "lang/lang_cloud_manager.h"
@@ -66,7 +65,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "ui/basic_click_handlers.h"
 #include "ui/boxes/confirm_box.h"
-#include "ui/boxes/peer_qr_box.h"
 #include "ui/controls/userpic_button.h"
 #include "ui/layers/generic_box.h"
 #include "ui/new_badges.h"
@@ -116,11 +114,8 @@ public:
 private:
 	void setupChildGeometry();
 	void initViewers();
-	void updatePhoneText();
 	void refreshNameGeometry(int newWidth);
-	void refreshPhoneGeometry(int newWidth);
 	void refreshUsernameGeometry(int newWidth);
-	void refreshQrButtonGeometry(int newWidth);
 
 	const not_null<Window::SessionController*> _controller;
 	const not_null<UserData*> _user;
@@ -129,10 +124,7 @@ private:
 
 	object_ptr<Ui::UserpicButton> _userpic;
 	object_ptr<Ui::FlatLabel> _name = { nullptr };
-	object_ptr<Ui::FlatLabel> _phone = { nullptr };
-	QString _phoneText;
 	object_ptr<Ui::FlatLabel> _username = { nullptr };
-	object_ptr<Ui::IconButton> _qrButton = { nullptr };
 
 };
 
@@ -167,31 +159,11 @@ Cover::Cover(
 	Ui::UserpicButton::Source::PeerPhoto,
 	st::infoProfileCover.photo)
 , _name(this, st::infoProfileCover.name)
-, _phone(this, st::defaultFlatLabel, st::popupMenuWithIcons)
 , _username(this, st::infoProfileMegagroupCover.status) {
 	_user->updateFull();
 
 	_name->setSelectable(true);
 	_name->setContextCopyText(tr::lng_profile_copy_fullname(tr::now));
-
-	_phone->setSelectable(true);
-	_phone->setContextCopyText(tr::lng_profile_copy_phone(tr::now));
-	const auto hook = [=](Ui::FlatLabel::ContextMenuRequest request) {
-		if (request.selection.empty()) {
-			const auto callback = [=] {
-				Info::Profile::CopyPhoneToClipboard(
-					Info::Profile::PhoneValue(_user));
-			};
-			request.menu->addAction(
-				tr::lng_profile_copy_phone(tr::now),
-				callback,
-				&st::menuIconCopy);
-		} else {
-			_phone->fillContextMenu(request);
-		}
-		Info::Profile::AddPhoneSpoilerMenu(request.menu, _user);
-	};
-	_phone->setContextMenuHook(hook);
 
 	initViewers();
 	setupChildGeometry();
@@ -225,18 +197,6 @@ Cover::Cover(
 		refreshNameGeometry(width());
 	}, _name->lifetime());
 
-	_qrButton.create(this, st::infoProfileLabeledButtonQr);
-	_qrButton->setAccessibleName(tr::lng_group_invite_context_qr(tr::now));
-	_qrButton->setClickedCallback([=, show = controller->uiShow()] {
-		Ui::DefaultShowFillPeerQrBoxCallback(show, _user);
-	});
-	Info::Profile::UsernamesValue(
-		_user
-	) | rpl::on_next([=](const auto &usernames) {
-		_qrButton->setVisible(!usernames.empty());
-		refreshNameGeometry(width());
-		refreshQrButtonGeometry(width());
-	}, _qrButton->lifetime());
 }
 
 Cover::~Cover() = default;
@@ -250,9 +210,7 @@ void Cover::setupChildGeometry() {
 			st::settingsPhotoTop,
 			newWidth);
 		refreshNameGeometry(newWidth);
-		refreshPhoneGeometry(newWidth);
 		refreshUsernameGeometry(newWidth);
-		refreshQrButtonGeometry(newWidth);
 	}, lifetime());
 }
 
@@ -262,18 +220,6 @@ void Cover::initViewers() {
 	) | rpl::on_next([=](const QString &name) {
 		_name->setText(name);
 		refreshNameGeometry(width());
-	}, lifetime());
-
-	Info::Profile::PhoneValue(
-		_user
-	) | rpl::on_next([=](const TextWithEntities &value) {
-		_phoneText = value.text;
-		updatePhoneText();
-	}, lifetime());
-
-	_user->session().settings().phoneNumberHiddenValue(
-	) | rpl::on_next([=] {
-		updatePhoneText();
 	}, lifetime());
 
 	Info::Profile::UsernameValue(
@@ -307,13 +253,9 @@ void Cover::initViewers() {
 void Cover::refreshNameGeometry(int newWidth) {
 	const auto nameLeft = st::settingsNameLeft;
 	const auto nameTop = st::settingsNameTop;
-	const auto qrButtonWidth = (_qrButton && !_qrButton->isHidden())
-		? (_qrButton->width() + st::infoProfileCover.rightSkip)
-		: 0;
 	auto nameWidth = newWidth
 		- nameLeft
-		- st::infoProfileCover.rightSkip
-		- qrButtonWidth;
+		- st::infoProfileCover.rightSkip;
 	if (const auto width = _badge.widget() ? _badge.widget()->width() : 0) {
 		nameWidth -= st::infoVerifiedCheckPosition.x() + width;
 	}
@@ -325,43 +267,13 @@ void Cover::refreshNameGeometry(int newWidth) {
 	_badge.move(badgeLeft, badgeTop, badgeBottom);
 }
 
-void Cover::updatePhoneText() {
-	if (_user->session().settings().phoneNumberHidden()) {
-		_phone->setMarkedText(
-			Ui::Text::Wrapped({ _phoneText }, EntityType::Spoiler));
-	} else {
-		_phone->setText(_phoneText);
-	}
-	refreshPhoneGeometry(width());
-}
-
-void Cover::refreshPhoneGeometry(int newWidth) {
-	const auto phoneLeft = st::settingsPhoneLeft;
-	const auto phoneTop = st::settingsPhoneTop;
-	const auto phoneWidth = newWidth
-		- phoneLeft
-		- st::infoProfileCover.rightSkip;
-	_phone->resizeToWidth(phoneWidth);
-	_phone->moveToLeft(phoneLeft, phoneTop, newWidth);
-}
-
 void Cover::refreshUsernameGeometry(int newWidth) {
 	const auto usernameLeft = st::settingsUsernameLeft;
-	const auto usernameTop = st::settingsUsernameTop;
+	const auto usernameTop = st::settingsPhoneTop;
 	const auto usernameRight = st::infoProfileCover.rightSkip;
 	const auto usernameWidth = newWidth - usernameLeft - usernameRight;
 	_username->resizeToWidth(usernameWidth);
 	_username->moveToLeft(usernameLeft, usernameTop, newWidth);
-}
-
-void Cover::refreshQrButtonGeometry(int newWidth) {
-	if (!_qrButton) {
-		return;
-	}
-	const auto buttonTop = (height() - _qrButton->height()) / 2;
-	const auto buttonRight = st::infoProfileCover.rightSkip;
-	const auto inset = st::infoProfileLabeledButtonQrInset;
-	_qrButton->moveToRight(buttonRight - inset, buttonTop, newWidth);
 }
 
 void BuildSectionButtons(SectionBuilder &builder) {
@@ -597,40 +509,6 @@ void BuildPremiumSection(SectionBuilder &builder) {
 	builder.addSkip();
 }
 
-void BuildHelpSection(SectionBuilder &builder) {
-	builder.addDivider();
-	builder.addSkip();
-
-	const auto controller = builder.controller();
-	builder.addButton({
-		.id = u"main/faq"_q,
-		.title = tr::lng_settings_faq(),
-		.icon = { &st::menuIconFaq },
-		.onClick = [=] { OpenFaq(controller); },
-		.keywords = { u"help"_q, u"support"_q, u"questions"_q },
-	});
-
-	builder.addButton({
-		.id = u"main/features"_q,
-		.title = tr::lng_settings_features(),
-		.icon = { &st::menuIconEmojiObjects },
-		.onClick = [] {
-			UrlClickHandler::Open(tr::lng_telegram_features_url(tr::now));
-		},
-		.keywords = { u"tips"_q, u"tutorial"_q },
-	});
-
-	builder.addButton({
-		.id = u"main/ask-question"_q,
-		.title = tr::lng_settings_ask_question(),
-		.icon = { &st::menuIconDiscussion },
-		.onClick = [=] { OpenAskQuestionConfirm(controller); },
-		.keywords = { u"contact"_q, u"feedback"_q },
-	});
-
-	builder.addSkip();
-}
-
 void BuildValidationSuggestions(SectionBuilder &builder) {
 	builder.add([](const WidgetContext &ctx) {
 		const auto controller = ctx.controller.get();
@@ -745,7 +623,6 @@ void Main::setupContent() {
 		builder.addSkip();
 		BuildInterfaceScale(builder);
 		BuildPremiumSection(builder);
-		BuildHelpSection(builder);
 
 		std::move(showFinished) | rpl::on_next([=] {
 			for (const auto &[id, entry] : *highlights) {
@@ -820,7 +697,6 @@ const auto kMeta = BuildHelper({
 
 	BuildInterfaceScale(builder);
 	BuildPremiumSection(builder);
-	BuildHelpSection(builder);
 });
 
 } // namespace

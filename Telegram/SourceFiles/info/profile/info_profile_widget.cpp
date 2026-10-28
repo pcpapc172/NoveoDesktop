@@ -357,7 +357,7 @@ rpl::producer<QString> Widget::title() {
 
 rpl::producer<Dialogs::Stories::Content> Widget::titleStories() {
 	const auto peer = controller()->key().peer();
-	if (peer && !peer->isChat()) {
+	if (peer && !peer->isChat() && !peer->isUser()) {
 		return Dialogs::Stories::LastForPeer(peer);
 	}
 	return nullptr;
